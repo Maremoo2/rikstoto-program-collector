@@ -43,6 +43,11 @@ EXPLANATIONS = {
     "BROWSER_NAVIGATION_FAILED": "Chromium could not navigate to the URL.",
     "RACE_DATA_UNVERIFIED": "Page opened but no confidently identified race entries; parsing requires follow-up.",
     "HTTP_PAGE_FAILED": "Public race URL could not be opened via plain HTTP.",
+    "PDF_HTTP_404": "No PDF was found for the known meeting candidate.",
+    "PDF_RESPONSE_NOT_PDF": "PDF endpoint returned HTML or another format.",
+    "PDF_TEXT_EXTRACTION_FAILED": "PDF downloaded, but extraction failed; inspect file and parser.",
+    "PDF_SOURCE_UNKNOWN": "Provide a known meeting race URL before testing one PDF candidate.",
+    "PDF_ROBOTS_BLOCKED": "PDF endpoint is not permitted by robots policy.",
 }
 
 
@@ -71,9 +76,19 @@ def classify_error(exc):
 
 def page_issue(text, final_url=""):
     preview = re.sub(r"\s+", " ", text).casefold()
-    if ("nettleseren din støttes ikke" in preview
-            or "browser is no longer supported" in preview
-            or ("eldre versjon av safari" in preview and "oppdat" in preview)):
+    compatibility_message = (
+        "nettleseren din støttes ikke" in preview
+        or "browser is no longer supported" in preview
+        or ("eldre versjon av safari" in preview and "oppdat" in preview)
+    )
+    # Rikstoto sometimes includes a Safari-compatibility banner alongside
+    # legitimate program HTML. Do not mistake that banner for a blocked page
+    # when actual race sections are also present.
+    substantial_program = bool(
+        re.search(r"(?:\bløp\s+\d+\b|\bprogram\b.{0,80}\b(?:odds|hest)\b)", preview)
+        and ("hest" in preview or "start" in preview or "odds" in preview)
+    )
+    if compatibility_message and not substantial_program:
         return "UNSUPPORTED_BROWSER_PAGE"
     if (re.search(r"(du må logge inn|logg inn for å se|you must sign in|sign in to view)", preview)
             or "/login" in urlparse(final_url).path.casefold()
