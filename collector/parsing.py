@@ -155,7 +155,7 @@ def _starts(block: list[str]) -> list[dict[str, Any]]:
         comment_lines = [clean(line) for line in tail[idx + 1:stop] if clean(line)]
         starts.append({"date": iso_date, "race_number": int(previous_race),
                        "post": previous_spot, "track": track, "driver_abbrev": driver,
-                       "starter_number": as_int(cell(0)) if trustworthy_cells else None,
+                       "starter_number": as_int(cell(0)) if basic_cells else None,
                        "distance_m": distance if basic_cells else None,
                        "placing": cell(2) if basic_cells else None,
                        "kilometre_time": cell(3) if basic_cells else None,
