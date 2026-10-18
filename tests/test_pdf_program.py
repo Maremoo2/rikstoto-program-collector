@@ -149,3 +149,15 @@ def test_unlabeled_race_keeps_inferred_provenance():
     result = parsed(unlabeled)
     assert result["races"][0]["race"]["race_number_source"] == "pdf_order_inferred"
     assert "RACE_NUMBER_ORDER_INFERRED" in result["qa"]["warnings"]
+
+
+def test_dotted_initials_horse_name_JC():
+    text = ("Løp 4\n1640m Autostart START KL. 20:30\n"
+            "5 FEARLESS FLIER, Gustav Johansson\n"
+            "6 J.C., Thomas Dalborg\n"
+            "7 ORACLE VIXI, Victor Rosleff\n"
+            "Mantorp 19.10.2026 Utvidet - rikstoto.no Side: 1 av 1\n")
+    parsed = parse_extended_pdf(text, meeting_id="S2_NR_2026-10-19", date="2026-10-19",
+                                url="official-source", captured_at="2026-10-18T21:27:01Z")
+    assert [(h["program_number"], h["name"]) for h in parsed["races"][0]["entrants"]] == [
+        (5, "FEARLESS FLIER"), (6, "J.C."), (7, "ORACLE VIXI")]
