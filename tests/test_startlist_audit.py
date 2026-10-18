@@ -79,3 +79,25 @@ def test_one_pdf_race_missing_blocks_full_coverage():
 def test_normalization_is_case_accent_insensitive():
     assert normalized_horse_name("Skjetne Lara") == normalized_horse_name("SKJETNE LARA")
     assert normalized_horse_name("Östra Häst") == normalized_horse_name("Ostra Hast")
+
+
+def test_name_mismatch_diagnostics_identify_exact_runner():
+    race = doc()
+    response = starts()
+    response["result"]["6"][1]["horseName"] = "Other Name"
+    audit = reconcile_startlist([race], response)
+    assert audit["status"] == "PARTIAL_OR_UNVERIFIED"
+    assert audit["mismatches"][0]["differences"] == [
+        {"number": 2, "pdf_name": "Lesja Loke", "startlist_name": "Other Name"}]
+    assert race["entrants"][1]["scratch_state"] == "UNVERIFIED"
+
+
+def test_number_mismatch_diagnostics_do_not_approve_race():
+    race = doc()
+    response = starts()
+    response["result"]["6"][1]["startNumber"] = 3
+    audit = reconcile_startlist([race], response)
+    mismatch = audit["mismatches"][0]
+    assert mismatch["missing_in_pdf"] == [3]
+    assert mismatch["missing_in_startlist"] == [2]
+    assert audit["status"] == "PARTIAL_OR_UNVERIFIED"
