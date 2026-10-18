@@ -202,9 +202,19 @@ def extract_pdf(binary: bytes, folder: Path):
         pdf = PdfReader(io.BytesIO(binary))
         text = "\n\n".join(page.extract_text() or "" for page in pdf.pages)
         (folder / "full_program.txt").write_text(text, encoding="utf-8")
+        # All following counts are source-text heuristics, not an audited
+        # guarantee that the PDF contains every horse or prior start.
+        race_starts = len(re.findall(r"(?m)^START KL\.", text))
+        horse_headers = len(re.findall(
+            r"(?m)^\d{1,2}\s+[A-ZÆØÅ][A-ZÆØÅÀ-ÖØ-Þ0-9 .\-()]+,", text))
+        history_rows = len(re.findall(
+            r"(?m)^.{1,24}\s+[A-ZÆØÅ]{2,3}\s+\d\d\.\d\d\.\d\d-\d+", text))
         return {"pages": len(pdf.pages), "text_characters": len(text),
                 "readable": bool(text.strip()),
-                "race_heading_mentions": len(re.findall(r"\bLøp\s+\d+\b", text, re.I))}
+                "race_heading_mentions": len(re.findall(r"\bLøp\s+\d+\b", text, re.I)),
+                "heuristic_races": race_starts, "heuristic_horses": horse_headers,
+                "heuristic_history_rows": history_rows,
+                "counts_verified": False}
     except Exception as exc:
         return {"readable": False, "error": f"{type(exc).__name__}: {str(exc)[:250]}"}
 
@@ -312,8 +322,8 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18):
                         # The V/trot route is known from an observed Norwegian
                         # trotting race, not a documented universal gallop API.
                         is_trot = (record["program_pdf"] == "PDF_TEXT_OK"
-                                   and "Galopp" not in
-                                   (mdir / "full_program.txt").read_text(encoding="utf-8")[:1000])
+                                   and "galopp" not in
+                                   (mdir / "full_program.txt").read_text(encoding="utf-8")[:1000].casefold())
                         if is_trot:
                             for n in record["race_numbers"][:max_races]:
                                 endpoint = f"{base}/api/game/program/{meeting}/V/trot/{n}"
