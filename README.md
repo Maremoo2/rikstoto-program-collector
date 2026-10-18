@@ -300,14 +300,20 @@ På en **planlagt morgenkjøring**, eller en **manuell kjøring med
 `persist_archive=true`**, laster et separat GitHub Actions-jobbtrinn
 ned den fullførte innsamlingen, kontrollerer manifestet og bygger
 `rikstoto-<DATE>-<UTC-RUN>.zip` pluss en egen SHA-256-fil.
-Deretter opprettes en egen GitHub **Release per kjøring** med taggen
-`rikstoto-program-<DATE>-<UTC-RUN>`. Release-assets inneholder
-kilde-PDF-er, startlister, JSON, metadata og QA. Det opprettes ingen
-Release ved automatiske `push`-smoke-tester.
+Deretter opprettes et **utkast (draft) til GitHub Release per kjøring**
+med taggen `rikstoto-program-<DATE>-<UTC-RUN>`. Utkastet er kun synlig
+for kontoer med skrive-/administrasjonstilgang, selv om selve repoet
+er offentlig. Original-PDF-er, startlister og strukturert data blir
+**ikke publisert åpent**. Dagsfilene, metadataene og QA beholdes som
+private-to-collaborators Release-assets. Vanlige `push`-smoke-tester
+publiserer ikke arkiv; et eksplisitt bootstrap-merket commit kan brukes
+ved innkjøring.
 
-Arkivet ligger under
-[Releases](https://github.com/Maremoo2/rikstoto-program-collector/releases).
-En Release er **ikke** det samme som et vanlig Actions-artefakt og
+Du finner egne **draft Releases** under
+[Releases](https://github.com/Maremoo2/rikstoto-program-collector/releases)
+når du er logget inn som repo-eier. Ikke trykk «Publish release» uten å
+ha kontrollert at du har rett til å distribuere kilde-PDF-ene offentlig.
+En draft Release er **ikke** det samme som et vanlig Actions-artefakt og
 har ikke den automatiske 90-dagers levetiden; arkivet kan fortsatt
 fjernes av administrator eller fremtidige tjenesteregler.
 GitHub krever en `GITHUB_TOKEN` med `contents:write` for denne
