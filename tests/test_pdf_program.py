@@ -142,3 +142,10 @@ V4 Xpress 18.10.2026 Utvidet - rikstoto.no Side: 1 av 1
     result = parsed(text)
     assert result["qa"]["race_numbers"] == [1, 10]
     assert [race["race"]["race_number"] for race in result["races"]] == [10, 1]
+
+
+def test_unlabeled_race_keeps_inferred_provenance():
+    unlabeled = SAMPLE.replace("1\\nTRIPPEL", "TRIPPEL", 1)
+    result = parsed(unlabeled)
+    assert result["races"][0]["race"]["race_number_source"] == "pdf_order_inferred"
+    assert "RACE_NUMBER_ORDER_INFERRED" in result["qa"]["warnings"]
