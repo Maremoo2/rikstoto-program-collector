@@ -74,6 +74,11 @@ def reconcile_startlist(pdf_races: list[dict[str, Any]], source: Any,
                                         "expected": sorted(api_horses), "actual": sorted(pdf_horses),
                                         "missing_in_pdf": sorted(set(api_horses) - set(pdf_horses)),
                                         "missing_in_startlist": sorted(set(pdf_horses) - set(api_horses)),
+                                        "missing_in_pdf_source_rows": [
+                                            {"number": n, "horse_name": api_horses[n]["horseName"],
+                                             "isScratched": api_horses[n]["isScratched"]}
+                                            for n in sorted(set(api_horses) - set(pdf_horses))
+                                        ],
                                         "malformed_api_rows": malformed})
             continue
         if any(normalized_horse_name(pdf_horses[n]["name"]) !=
