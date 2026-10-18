@@ -20,7 +20,7 @@ def test_package_source_files_with_timestamp_and_checksum(tmp_path):
         "status": "CAPTURED_UNVERIFIED", "meetings": [{"meeting_id": "OR_NR_2026-10-18"}],
     }))
     packaged = build_release_archive(root, tmp_path / "assets")
-    assert packaged["tag"] == "rikstoto-program-2026-10-18"
+    assert packaged["tag"] == "rikstoto-program-2026-10-18-20261018T070001123456Z"
     assert packaged["collection_status"] == "CAPTURED_UNVERIFIED"
     with zipfile.ZipFile(packaged["archive"]) as z:
         paths = sorted(z.namelist())
