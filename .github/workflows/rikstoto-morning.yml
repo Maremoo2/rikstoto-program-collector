@@ -73,8 +73,8 @@ jobs:
           delay = round((now - expected).total_seconds() / 60, 1)
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
               out.write("## Triggerkontroll\n\n")
-              out.write(f"- Event: \`{trigger}\`\n")
-              out.write(f"- Faktisk registreringstid i Oslo: \`{now.isoformat()}\`\n")
+              out.write(f"- Event: `{trigger}`\n")
+              out.write(f"- Faktisk registreringstid i Oslo: `{now.isoformat()}`\n")
               if trigger == "schedule":
                   out.write(f"- Avstand fra planlagt kl. 07:00: **{delay} minutter**\n")
                   out.write("- Dette verifiserer en faktisk tidsstyrt kjøring, ikke bare YAML-oppsettet.\n")
