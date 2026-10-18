@@ -150,26 +150,29 @@ def _starts(block: list[str]) -> list[dict[str, Any]]:
             distance = None
         # For heavily transformed text, exact cell offsets are untrustworthy;
         # store raw text and null ambiguous structured cells.
-        trustworthy_cells = len(cells) >= 7 and distance is not None
+        basic_cells = len(cells) >= 4 and distance is not None
+        full_cells = len(cells) >= 9 and basic_cells
         comment_lines = [clean(line) for line in tail[idx + 1:stop] if clean(line)]
         starts.append({"date": iso_date, "race_number": int(previous_race),
                        "post": previous_spot, "track": track, "driver_abbrev": driver,
                        "starter_number": as_int(cell(0)) if trustworthy_cells else None,
-                       "distance_m": distance if trustworthy_cells else None,
-                       "placing": cell(2) if trustworthy_cells else None,
-                       "kilometre_time": cell(3) if trustworthy_cells else None,
-                       "shoes": cell(4) if trustworthy_cells else None,
-                       "wagon": cell(5) if trustworthy_cells else None,
-                       "odds_display": cell(6) if trustworthy_cells else None,
-                       "prize_display": cell(7) if trustworthy_cells else None,
-                       "top_three": cell(8) if trustworthy_cells else None,
+                       "distance_m": distance if basic_cells else None,
+                       "placing": cell(2) if basic_cells else None,
+                       "kilometre_time": cell(3) if basic_cells else None,
+                       "shoes": cell(4) if full_cells else None,
+                       "wagon": cell(5) if full_cells else None,
+                       "odds_display": cell(6) if full_cells else None,
+                       "prize_display": cell(7) if full_cells else None,
+                       "top_three": cell(8) if full_cells else None,
                        "raw_text": raw,
                        "comment": " ".join(comment_lines) if comment_lines else None})
     return starts
 
 
 def extract_entrants(text: str) -> list[dict[str, Any]]:
-    lines = [clean(line) for line in text.splitlines() if clean(line)]
+    # Preserve tabs: historical table columns depend on the original cell separators.
+    # Removing tabs here silently discarded distance, finish, gear, odds and prize.
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
     occurrences = []
     seen_heads: set[int] = set()
     for idx, line in enumerate(lines):
