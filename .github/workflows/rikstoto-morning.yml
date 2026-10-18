@@ -1,29 +1,10 @@
 name: Daily Rikstoto full programs – 07 Oslo
-# Recheck 2026-10-19 using the tested initial-only horse-name parser.
+# Only daily 07 Oslo and explicit manual runs collect official source data.
 
 on:
   schedule:
     - cron: '0 7 * * *'
       timezone: Europe/Oslo
-  push:
-    branches: [main]
-    paths:
-      - 'collector/daily.py'
-      - 'collector/pdf_program.py'
-      - 'collector/calendar_audit.py'
-      - 'collector/homepage_schedule.py'
-      - 'collector/release_archive.py'
-      - 'collector/prewatch_handoff.py'
-      - 'tests/test_prewatch_handoff.py'
-      - 'collector/startlist_audit.py'
-      - 'collector/parsing.py'
-      - 'tests/test_daily.py'
-      - 'tests/test_pdf_program.py'
-      - 'tests/test_calendar_audit.py'
-      - 'tests/test_homepage_schedule.py'
-      - 'tests/test_release_archive.py'
-      - 'tests/test_startlist_audit.py'
-      - '.github/workflows/rikstoto-morning.yml'
   workflow_dispatch:
     inputs:
       date:
@@ -52,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
-      SELECTED_DATE: ${{ inputs.date || (github.event_name == 'push' && contains(github.event.head_commit.message, '[crawl-2026-10-19]') && '2026-10-19') || '' }}
+      SELECTED_DATE: ${{ inputs.date || '' }}
       SEED_MEETING: ${{ inputs.seed_meeting || '' }}
       TZ: Europe/Oslo
     steps:
@@ -190,9 +171,8 @@ jobs:
   persist:
     name: Save privately accessible draft archive in GitHub Releases
     needs: [full-day]
-    # Normally only schedule/manual captures publish. A single explicitly
-    # marked bootstrap commit may also publish today's real-source snapshot.
-    if: ${{ always() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.persist_archive == true) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[archive-now]'))) }}
+    # Publish only scheduled or manually authorized archives.
+    if: ${{ always() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.persist_archive == true)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     permissions:
