@@ -102,3 +102,10 @@ def test_blocked_robots_never_requests_race_page(monkeypatch, tmp_path):
     monkeypatch.setattr(diagnose, "fetch_http", fake_fetch)
     assert diagnose.run(TARGET, "both", str(tmp_path / "report.json")) == 1
     assert len(urls) == 1  # Only robots.txt; protected race page never requested
+
+
+def test_safari_banner_with_real_program_is_not_misdiagnosed():
+    text = ("Nettleseren din støttes ikke lenger. " 
+            "Spill og program. Løp 6. Hest 1 Vinner og odds. " 
+            "Hest 2 Startliste. Hest 3.")
+    assert diagnose.page_issue(text) is None
