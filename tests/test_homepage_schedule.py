@@ -54,3 +54,18 @@ def test_cross_source_comparison_never_falsely_certifies_all_tracks():
     missing = schedule_comparison({"OR_NR_2026-10-18"}, home, {}, {})
     assert missing["missing_from_collector"] == ["S1_NR_2026-10-18"]
     assert missing["status"] == "MISSING_OR_DISAGREEMENT"
+
+
+def test_observed_eight_meetings_from_real_october_frontpage_fixture():
+    from pathlib import Path
+    fixture = Path(__file__).parent / "fixtures" / "observed_homepage_2026-10-18.json"
+    src = json.loads(fixture.read_text(encoding="utf-8"))
+    source_html = homepage(src["raceDays"]["data"])
+    parsed = homepage_racedays(source_html, "2026-10-18")
+    assert parsed["meeting_count"] == 8
+    assert sum(not row["is_multi_track"] for row in parsed["meetings"].values()) == 7
+    assert parsed["meetings"]["F1_NR_2026-10-18"]["race_numbers"] == [3]
+    # One advertised bettable Parislongchamp race is NOT the full 8-race
+    # program; never use SPA race counts to reject the official startlist.
+    assert parsed["race_counts_are_complete"] is False
+    assert parsed["meetings"]["X1_NR_2026-10-18"]["is_multi_track"]
