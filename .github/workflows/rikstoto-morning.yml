@@ -4,6 +4,12 @@ on:
   schedule:
     - cron: '0 7 * * *'
       timezone: Europe/Oslo
+  push:
+    branches: [main]
+    paths:
+      - 'collector/daily.py'
+      - 'tests/test_daily.py'
+      - '.github/workflows/rikstoto-morning.yml'
   workflow_dispatch:
     inputs:
       date:
