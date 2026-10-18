@@ -79,3 +79,25 @@ def test_summary_fails_closed_without_races():
     p={'races':[],'captures':[], 'discovery':{'status':'candidate_only'}}
     assert summarize(p, 1)['status']=='REVIEW_REQUIRED'
     assert 'NO_RACES_PARSED' in summarize(p, 1)['warnings']
+
+def test_historical_table_preserves_tab_columns_and_respects_missing_ones():
+    race = parse_race(sample_program(), URL, captured_at='2026-10-18T08:06:00Z')
+    start = race['entrants'][0]['past_starts'][0]
+    assert start['starter_number'] == 5
+    assert start['distance_m'] == 2320
+    assert start['placing'] == '3'
+    assert start['kilometre_time'] == '32,8'
+    # This synthetic fixture lacks a separate wagon cell; it must not be
+    # shifted into an incorrect odds/prize column.
+    assert start['odds_display'] is None
+    assert start['prize_display'] is None
+
+
+def test_historical_table_with_complete_columns():
+    raw = sample_program().replace("\t32,8\tVa\t48\t20'", "\t32,8\t\tVa\t48\t20'")
+    race = parse_race(raw, URL, captured_at='2026-10-18T08:06:00Z')
+    start = race['entrants'][0]['past_starts'][0]
+    assert start['shoes'] is None
+    assert start['wagon'] == 'Va'
+    assert start['odds_display'] == '48'
+    assert start['prize_display'] == "20'"
