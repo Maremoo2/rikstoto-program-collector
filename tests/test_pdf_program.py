@@ -145,7 +145,7 @@ V4 Xpress 18.10.2026 Utvidet - rikstoto.no Side: 1 av 1
 
 
 def test_unlabeled_race_keeps_inferred_provenance():
-    unlabeled = SAMPLE.replace("1\\nTRIPPEL", "TRIPPEL", 1)
+    unlabeled = SAMPLE.replace("1\nTRIPPEL", "TRIPPEL", 1)
     result = parsed(unlabeled)
     assert result["races"][0]["race"]["race_number_source"] == "pdf_order_inferred"
     assert "RACE_NUMBER_ORDER_INFERRED" in result["qa"]["warnings"]
