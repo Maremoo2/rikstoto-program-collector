@@ -46,6 +46,9 @@ def test_full_program_two_races_and_three_horses():
     assert result["qa"]["horses"] == 3
     assert result["qa"]["history_rows"] == 4
     assert [r["race"]["scheduled_time_local"] for r in result["races"]] == ["17:53", "18:15"]
+    assert result["races"][0]["race"]["race_number_source"] == "pdf_heading_number"
+    assert result["races"][1]["race"]["race_number_source"] == "pdf_heading"
+    assert "RACE_NUMBER_ORDER_INFERRED" not in result["qa"]["warnings"]
 
 
 def test_race_history_and_numbers_preserved():
