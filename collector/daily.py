@@ -118,12 +118,16 @@ def scratch_signals(value):
                 except (ValueError, TypeError):
                     pass
                 break
+        # Race-level 'status' does not establish a horse scratch.
+        # Count status/flag fields only on nodes that identify a horse.
+        horse_name_here, horse_number_here = _horse_info(obj)
+        has_horse_identity = bool(horse_name_here or horse_number_here is not None)
         positive = in_scratch_list
         for key, val in obj.items():
-            if key in SCRATCH_KEYS and isinstance(val, (bool, int, str)):
+            if has_horse_identity and key in SCRATCH_KEYS and isinstance(val, (bool, int, str)):
                 flags_seen += 1
                 positive |= val is True or str(val).strip().upper() in SCRATCH_STATUSES
-            if key.lower() in ("status", "startstatus", "horsestatus") and isinstance(val, str):
+            if has_horse_identity and key.lower() in ("status", "startstatus", "horsestatus") and isinstance(val, str):
                 flags_seen += 1
                 positive |= val.strip().upper() in SCRATCH_STATUSES
         if positive:
@@ -405,8 +409,11 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18):
             manifest["status"] = (
                 "CAPTURED_UNVERIFIED" if manifest["meetings"] and
                 all(r["program_pdf"] == "PDF_TEXT_OK"
+                    and bool(r.get("pdf_race_numbers"))
                     and r["scratching_status"] == "EXPLICIT_FLAGS_OBSERVED"
-                    and bool(r["race_numbers"]) for r in manifest["meetings"])
+                    and bool(r["race_numbers"])
+                    and set(r["race_numbers"]) == set(r["pdf_race_numbers"])
+                    for r in manifest["meetings"])
                 else "REVIEW_REQUIRED")
             await ctx.close()
             await browser.close()
