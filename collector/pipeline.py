@@ -193,12 +193,15 @@ async def collect(*, date: str, source_url: str, seed_urls: list[str],
                   out: Path, browser_pdf: bool, official_pdf: bool,
                   scan_races: int, expected_races: int | None,
                   delay_s: float, robots_policy: str,
-                  browser_executable: str | None = None) -> Path:
+                  browser_executable: str | None = None,
+                  only_source_race: bool = False) -> Path:
     from playwright.async_api import async_playwright
     if not re.fullmatch(r"20\d{2}-\d{2}-\d{2}", date):
         raise ValueError("date must be YYYY-MM-DD")
     if not source_allowed(source_url) or any(not source_allowed(u) for u in seed_urls):
         raise ValueError("source and seeds must be public HTTPS www.rikstoto.no URLs")
+    if only_source_race and not is_race_url(source_url, date):
+        raise ValueError("--only-source-race requires a concrete source race URL for the specified date")
     run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     folder = out/run_id
     folder.mkdir(parents=True, exist_ok=False)
@@ -245,12 +248,16 @@ async def collect(*, date: str, source_url: str, seed_urls: list[str],
                 for index in range(1, scan_races + 1):
                     links.append(normal_url(race_url(seed, index)))
             payload["discovery"]["notes"].append("Bounded race-number probing; candidate set not verified by official schedule")
+        if only_source_race:
+            links = [normal_url(source_url)]
+            payload["discovery"]["status"] = "single_source_race"
+            payload["discovery"]["notes"].append("Explicit one-race limit; no additional race URLs followed")
         links = sorted(set(links), key=lambda u: (link_identity(u)["meeting_id"] or "", link_identity(u)["race_number"] or 0))
         payload["discovery"]["urls"] = links
         payload["discovery"]["status"] = "candidate_only" if scan_races else "link_extracted"
         seen = set()
         for idx, url in enumerate(links, start=1):
-            if url == source_url: rec = first
+            if normal_url(url) == normal_url(source_url): rec = first
             else:
                 if not robots.permits(url):
                     payload["captures"].append({"url": url,"status": "robots_blocked", "captured_at_utc": now()})
