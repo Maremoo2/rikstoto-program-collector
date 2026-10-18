@@ -96,7 +96,7 @@ def build_handoff(root: Path, dest: Path):
         "collection_status": m.get("status"),
         "source_archive_tag": f"rikstoto-program-{day}-{run_id}",
         "schedule_qa": m.get("schedule_comparison", {}),
-        "meeting_feeds": [], "no_race_meetings": [],
+        "meeting_feeds": [], "no_race_meetings": [], "race_queue": [],
         "notes": ["Races and starts only; no current WIN prices or V3 sports scoring.",
                   "All scratch statuses are time-stamped snapshots, not final.",
                   "GitHub draft Releases must be fetched by numeric release ID, not by tag."],
@@ -108,6 +108,30 @@ def build_handoff(root: Path, dest: Path):
             index["no_race_meetings"].append(mid)
             continue
         readiness = source_readiness(meeting)
+        for doc in docs:
+            race = doc["race"]
+            qa = doc.get("qa", {})
+            runners = doc.get("entrants", [])
+            blockers = []
+            if not readiness["source_ready_snapshot"]:
+                blockers.append(readiness["source_blocker"])
+            if not runners:
+                blockers.append("NO_RUNNERS")
+            if not race.get("scheduled_time_local"):
+                blockers.append("START_TIME_UNKNOWN")
+            if qa.get("warnings"):
+                blockers.append("RACE_QA_WARNINGS_REVIEW")
+            index["race_queue"].append({
+                "race_key": f"{mid}|{race['race_number']}",
+                "meeting_id": mid, "race_number": race["race_number"],
+                "track": meeting["listing_source"].get("track"),
+                "start_local": race.get("scheduled_time_local"),
+                "runner_count": len(runners),
+                "history_rows": qa.get("past_start_rows", 0),
+                "source_ready_snapshot": not blockers,
+                "source_blockers": blockers,
+                "source_release_tag_prefix": f"prewatch-src-{day}-{mid}-",
+            })
         header = (
             "# PRE-WATCH DATA FEED (not a betting recommendation)\n\n"
             f"Schema={SCHEMA} | Date={day} Europe/Oslo | Run={run_id}\n"
@@ -156,6 +180,8 @@ def build_handoff(root: Path, dest: Path):
                                       if item["source_ready_snapshot"])
     index["source_blocked_races"] = sum(item["race_count"] for item in index["meeting_feeds"]
                                         if not item["source_ready_snapshot"])
+    index["queue_ready_races"] = sum(bool(r["source_ready_snapshot"]) for r in index["race_queue"])
+    index["queue_review_races"] = len(index["race_queue"]) - index["queue_ready_races"]
     index["meeting_count"] = len(meetings)
     index["race_count"] = sum(len(races.get(x["meeting_id"], [])) for x in meetings)
     index["runner_count"] = sum(len(doc.get("entrants", []))
@@ -170,6 +196,7 @@ def build_handoff(root: Path, dest: Path):
         "Read first-party GitHub REST /repos/Maremoo2/rikstoto-program-collector/releases "
         "via authenticated connector; find matching draft tag, then read /releases/{numeric_id}.body.",
         "A draft may return 404 on /releases/tags/{tag}; use numeric ID from list.",
+        f"QUEUE_READY_RACES={index['queue_ready_races']} | QUEUE_REVIEW_RACES={index['queue_review_races']}",
         "Meeting source-release tags:",
     ]
     for item in index["meeting_feeds"]:
