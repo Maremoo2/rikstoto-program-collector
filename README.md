@@ -343,3 +343,49 @@ strukturerte dagskilder og alle oppdagede møte-programmer er behandlet
 og avstemt. Det betyr *ikke* uavhengig bevis for alle løp i hele
 markedet. Ved manglende dagskilde eller avkortet møteutvalg brukes
 `REVIEW_REQUIRED`. `completeness_verified` forblir `false`.
+
+
+## Automatisk Pre-Watch-kildebro fra 07:00-arkivet (18.10.2026)
+
+Eksisterende planlagte **Pre-Watch V3.3.12 – Løpsvakt** (09–21 Oslo)
+er oppdatert med en read-only kildebro. Den operasjonelle V3/V3.3.12-
+modellen, scorer, gates, 25 NOK WIN, shadow-only, historiske frys og
+spillebeslutninger er IKKE endret. Ingen ny ChatGPT-task ble opprettet.
+
+GitHub morgenjobben bygger av offentlig PDF og startliste et eget
+kildespeil: prewatch_source_v1. Det dekker fysiske norske/svenske møter
+og inneholder alle løp og hester, opptil fem tidligere datostemplede
+originalutdrag per hest, samt eksplisitt scratchstatus per timestamp.
+Den tar ikke med Frankrike/Canada eller V4 Xpress som nye fysiske baner.
+
+Hver kilde-bunt arkiveres som ikke-offentlig **draft GitHub Release** med
+navn prewatch-src-YYYY-MM-DD-MEETING-pN-RUNID. Bunter er begrenset til
+95 000 tegn og deles ved LØPSGRENSE, aldri midt i et hestefelt.
+Det originale arkivets draft Release inneholder en datert indeks
+med kildebunt-tagger, antall løp og eksakte løpsnumre per bunt.
+
+Pre-Watch kjører kun lesing gjennom tilkoblet GitHub-connector:
+- GET https://api.github.com/repos/Maremoo2/rikstoto-program-collector/releases?per_page=100
+- Finn nyeste arkiv DATO = Europe/Oslo i dag, korrekt matching RUNID.
+- For hver valgt kildebunt, hent GET /repos/Maremoo2/rikstoto-program-collector/releases/{numeric_id}
+  og les release.body som ren UTF-8.
+- For DRAFTS kan GET-by-tag gi HTTP 404 selv om Release finnes:
+  identifiser alltid release ved numerisk ID fra listingen.
+- Prioriter ett faktisk fremtidig, analyserbart NO/SE-løp om gangen.
+  Hent ikke alle detaljer ukritisk hver time.
+- Merk originalt datostempel og scratch_asof. Morgenens program er
+  statisk historikk, aldri gjeldende WIN-odds eller endelige strykninger.
+- Kryssjekk eventuelle nye strykninger og utstyr mot ferske offisielle
+  kilder. Betfase trenger fortsatt brukerens ferske individuelle
+  WIN-priser for alle hester, egen p(win), fair/minimum odds og positiv EV.
+- Logg READ_OK / READ_PARTIAL / READ_UNAVAILABLE / STALE i eksisterende
+  Google Sheet auditfelt bare hvis write og readback-gates faktisk fungerer.
+- GitHub-verktøy utilgjengelig? Ærlig delstatus og ordinær Rikstoto-
+  first fallback; aldri fabrikert data eller nye modellregler.
+
+VERIFIKASJON: GitHub-run 39125075007 arkiverte 5 NO/SE-møter,
+47 løp og 510 hester i draft-bunter, og connectoren leste både
+indeksen og konkrete hestehistorikker fra release.body.
+Denne interaktive tilgangen beviser IKKE at en reell planlagt Pre-Watch-
+kjøring allerede har logget READ_OK. Det kontrolleres først ved en
+faktisk 09–21-kjøring etter installasjonen.
