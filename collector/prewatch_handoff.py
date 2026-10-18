@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 
 MAX_BODY = 95_000
-HISTORY_LIMIT = 110
+HISTORY_LIMIT = 500
 SCHEMA = "prewatch_source_v1"
 
 
