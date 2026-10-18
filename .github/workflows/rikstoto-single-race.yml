@@ -1,6 +1,10 @@
 name: Rikstoto single-race smoke test
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/rikstoto-single-race.yml'
   workflow_dispatch:
     inputs:
       date:
@@ -22,8 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     env:
-      RACE_DATE: ${{ inputs.date }}
-      RACE_URL: ${{ inputs.race_url }}
+      RACE_DATE: ${{ inputs.date || '2026-10-18' }}
+      RACE_URL: ${{ inputs.race_url || 'https://www.rikstoto.no/Spill/OR_NR_2026-10-18/V?race=6&p=6:0' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -49,7 +53,7 @@ jobs:
           PY
           python -m collector collect --date "$RACE_DATE" \
             --source-url "$RACE_URL" --seed-url "$RACE_URL" \
-            --scan-races 0 --expected-races 1 --out output \
+            --scan-races 0 --only-source-race --expected-races 1 --out output \
             2>&1 | tee collection-console.log
       - name: Publish collection QA
         if: always()
