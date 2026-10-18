@@ -8,7 +8,9 @@ on:
     branches: [main]
     paths:
       - 'collector/daily.py'
+      - 'collector/pdf_program.py'
       - 'tests/test_daily.py'
+      - 'tests/test_pdf_program.py'
       - '.github/workflows/rikstoto-morning.yml'
   workflow_dispatch:
     inputs:
@@ -74,12 +76,15 @@ jobs:
                             f"**Fullstendighet verifisert:** {doc['completeness_verified']}  \n"
                             f"**Baner/møter funnet:** {counts.get('meetings_discovered', 0)}  \n"
                             f"**Offisielle program-PDF-er:** {counts.get('full_program_pdfs', 0)}  \n"
-                            f"**Positivt identifiserte strykninger:** {counts.get('scratches_positively_identified', 0)}  \n\n")
-                  out.write("| Møte-ID | Fullt program | Strykningskilde | Løp funnet | Strykninger |\n")
+                            f"**Positivt identifiserte strykninger:** {counts.get('scratches_positively_identified', 0)}  \n"
+                            f"**Strukturerte løp fra PDF:** {counts.get('pdf_races_parsed', 0)}  \n"
+                            f"**Hester fra PDF:** {counts.get('pdf_horses_parsed', 0)}  \n"
+                            f"**Tidligere starter fra PDF:** {counts.get('pdf_history_rows', 0)}  \n\n")
+                  out.write("| Møte-ID | Fullt program | Strykningskilde | Løp fra PDF | Strykninger |\n")
                   out.write("|---|---|---|---|---|\n")
                   for m in doc.get("meetings", []):
                       out.write(f"| {m['meeting_id']} | {m['program_pdf']} | {m['scratching_status']} | "
-                                f"{len(m['race_numbers'])} | {m.get('positive_scratches', 0)} |\n")
+                                f"{len(m.get('pdf_race_numbers', []))} | {m.get('positive_scratches', 0)} |\n")
                   out.write("\n### Varsler\n\n")
                   for warning in doc.get("warnings", []):
                       out.write(f"- \x60{warning}\x60\n")
