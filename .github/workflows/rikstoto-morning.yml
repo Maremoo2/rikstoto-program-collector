@@ -10,11 +10,15 @@ on:
       - 'collector/daily.py'
       - 'collector/pdf_program.py'
       - 'collector/calendar_audit.py'
+      - 'collector/homepage_schedule.py'
+      - 'collector/release_archive.py'
       - 'collector/startlist_audit.py'
       - 'collector/parsing.py'
       - 'tests/test_daily.py'
       - 'tests/test_pdf_program.py'
       - 'tests/test_calendar_audit.py'
+      - 'tests/test_homepage_schedule.py'
+      - 'tests/test_release_archive.py'
       - 'tests/test_startlist_audit.py'
       - '.github/workflows/rikstoto-morning.yml'
   workflow_dispatch:
@@ -27,6 +31,11 @@ on:
         description: "Optional known meeting ID (e.g. OR_NR_2026-10-18); does not verify full discovery"
         required: false
         type: string
+      persist_archive:
+        description: "Save this manual run as durable public GitHub Release assets (ZIP and SHA-256)"
+        required: false
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -123,3 +132,63 @@ jobs:
         run: |
           echo "Collection incomplete: inspect job summary, warnings and downloaded files."
           exit 1
+
+  persist:
+    name: Save public source archive as GitHub Release
+    needs: [full-day]
+    # Only the scheduled daily archive and explicitly opted-in manual runs
+    # get permanent release assets. Push-triggered smoke tests never publish.
+    if: ${GH} always() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.persist_archive == true)) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - name: Checkout packaging code
+        uses: actions/checkout@v4
+      - name: Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download captured daily sources
+        uses: actions/download-artifact@v4
+        with:
+          name: rikstoto-morning-programs
+          path: daily-artifact
+      - name: Build an immutable archive and SHA-256 checksum
+        id: package
+        run: |
+          python -m collector.release_archive \
+            --root daily-artifact/output/daily \
+            --dest release-assets \
+            --github-output "$GITHUB_OUTPUT"
+      - name: Publish date release (keep individual run ZIPs unchanged)
+        env:
+          GH_TOKEN: ${GH} github.token }}
+          GH_REPO: ${GH} github.repository }}
+          RELEASE_TAG: ${GH} steps.package.outputs.tag }}
+          ZIP_FILE: ${GH} steps.package.outputs.archive }}
+          HASH_FILE: ${GH} steps.package.outputs.checksum }}
+          RELEASE_NOTES: ${GH} steps.package.outputs.notes }}
+          RELEASE_DATE: ${GH} steps.package.outputs.date }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$RELEASE_TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
+            gh release create "$RELEASE_TAG" "$ZIP_FILE" "$HASH_FILE" \
+              --repo "$GH_REPO" --target "$GITHUB_SHA" \
+              --title "Rikstoto programarkiv $RELEASE_DATE" \
+              --notes-file "$RELEASE_NOTES" --prerelease --latest=false
+          else
+            # An existing archive must never be silently overwritten.
+            for asset in "$ZIP_FILE" "$HASH_FILE"; do
+              asset_name="$(basename "$asset")"
+              if gh release view "$RELEASE_TAG" --repo "$GH_REPO" \
+                    --json assets --jq '.assets[].name' | grep -Fxq "$asset_name"; then
+                echo "Archive asset already exists, keeping original: $asset_name"
+              else
+                gh release upload "$RELEASE_TAG" "$asset" --repo "$GH_REPO"
+              fi
+            done
+          fi
+          gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json url --jq '.url' >> "$GITHUB_STEP_SUMMARY"
