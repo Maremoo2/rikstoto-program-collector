@@ -33,6 +33,10 @@ MAX_JSON_BYTES = 6_000_000
 MAX_PDF_BYTES = 24_000_000
 
 
+class StopCollection(RuntimeError):
+    """Site explicitly refused a request or signalled rate limiting."""
+
+
 def utcnow():
     return datetime.now(timezone.utc).isoformat()
 
@@ -154,6 +158,8 @@ async def request(ctx, robots, url, path: Path, log, *, binary=False):
         if status != 200:
             log.append({"url": url, "status": f"HTTP_{status}", "content_type": ct,
                         "at_utc": utcnow()})
+            if status in (403, 429):
+                raise StopCollection(f"Site returned HTTP {status}; stop further requests: {url}")
             return None
         raw = await reply.body()
         limit = MAX_PDF_BYTES if binary else MAX_JSON_BYTES
@@ -181,6 +187,8 @@ async def request(ctx, robots, url, path: Path, log, *, binary=False):
                     "sha256": hashlib.sha256(raw).hexdigest(),
                     "path": str(path), "at_utc": utcnow()})
         return value
+    except StopCollection:
+        raise
     except Exception as exc:
         log.append({"url": url, "status": "NETWORK_ERROR",
                     "error": f"{type(exc).__name__}: {str(exc)[:350]}",
