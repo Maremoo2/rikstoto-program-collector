@@ -46,7 +46,7 @@ python -m collector collect \
   --scan-races 0
 ```
 
-Rikstoto is a dynamic site; browser captures may fail or omit data. Default robots policy is **strict**: if permission can't be established, no site pages are requested and an auditable `REVIEW_REQUIRED` output is generated. `--robots-policy warn` changes only handling of an unavailable robots file, not explicit disallow rules; first review the site's terms/permission. Do not evade site restrictions.
+Rikstoto is a dynamic site; browser captures may fail or omit data. Robots behavior now follows RFC 9309: confirmed `robots.txt` HTTP 404/410 means unavailable (not an explicit Disallow) and permits an ordinary request, but an explicit Disallow, network error, 5xx, or uncertain policy still stops the collector. For caution, HTTP 403/429 on robots.txt also stops requests. The old `--robots-policy warn` argument no longer overrides those restrictions. Check applicable website terms separately and do not evade restrictions.
 
 ## Offline parsing and QA
 
@@ -87,10 +87,63 @@ python -m pytest -q
 
 The site could not be retrieved from the development environment. Therefore: (1) the current parsing rules are tested against the layout you supplied, not a real fetched browser capture; (2) fully reliable discovery across **all meetings** on a day is unverified; (3) shoe/wagon data and some prior-start fields are retained in raw HTML/text when they cannot be safely assigned; (4) official PDF downloads depend on actual links and access permissions. Fixes should be made from saved captures and regression fixtures, never guesses.
 
-## Diagnose nettverkstilgang (GitHub Actions)
+## Systematisk feilsøking på GitHub
 
-Åpne **Actions → Rikstoto connectivity diagnostics → Run workflow**. Jobben kjører DNS-, HTTP-, robots- og (hvis tillatt) Playwright-sjekk i GitHub-hostet Ubuntu. Den kjører også ved endringer i diagnosekoden og hver mandag. Den gjør ingen innlogging, omgår ingen tilgangsbegrensninger og lagrer ikke innhold fra programmet.
+**Utgangspunkt (18.10.2026):** GitHub-hostet Ubuntu løste DNS for Rikstoto,
+men `robots.txt` svarte HTTP 404. Den gamle crawleren stoppet før den åpnet
+løpsprogrammet. Denne håndteringen er rettet i både collector og diagnostics.
 
-Les tabellen i **Job summary**. Last ned artefakten `rikstoto-diagnostics` for `report.json` med tidsstempel, feilkoder og forklaringer. Rødt resultat betyr at en forutsetning feilet, ikke nødvendigvis at Rikstoto-parseren er ødelagt.
+1. **Diagnose:** Åpne **Actions → Rikstoto connectivity diagnostics → Run workflow**.
+   Standard `strategy=all` prøver etter tur DNS, TLS, robots-policy, HTTP,
+   Chromium og ett mulig **offisielt utvidet PDF-program** for den kjente banen.
+   Velg `http`, `browser` eller `pdf` for å isolere en metode.
+2. **Les Job summary:** Feilkoder som `DNS_RESOLUTION_FAILED`,
+   `HTTP_403`, `HTTP_429`, `ROBOTS_DISALLOWED`,
+   `UNSUPPORTED_BROWSER_PAGE`, `BROWSER_NAVIGATION_FAILED`,
+   `PDF_HTTP_404`, `PDF_RESPONSE_NOT_PDF` og
+   `PDF_TEXT_EXTRACTION_FAILED` angir neste undersøkelse. `ROBOTS_MISSING_404`
+   er en **advarsel**, ikke et blokkert tilsynsresultat.
+3. **Last ned rikstoto-diagnostics:** `report.json`, konsoll-logg,
+   eventuelt `browser.png` og `official_candidate.pdf/.txt`.
+   Et 200-svar eller et skjermbilde betyr ikke at hestehistorikken er riktig.
+4. **Hvis nettsiden fungerer:** Åpne **Actions → Rikstoto single-race smoke test
+   → Run workflow**. Dette tester bare ett kjent løp og arkiverer faktisk
+   `program.json`, SQLite, Excel, PDF, kildetekst og QA. Kontroller feltene
+   opp mot det opprinnelige programmet før en full løpsdag forsøkes.
+5. **Hvis nettsiden ikke fungerer, men den offisielle PDF-en gjør det:**
+   Bruk PDF-en som kandidat for program/historikk. Den må få en egen,
+   validerbar tabellparser før den kan levere normaliserte hester/starter.
+   Nettstedet eller andre autoritative kilder trengs fortsatt for løpende odds
+   og strykninger. At formatet virker historisk er ikke bevis for at enhver
+   aktuell løpsdag har en tilgjengelig PDF.
 
-Lokalt: `python -m collector.diagnose --browser --out diagnostics/report.json` (krever Playwright/Chromium). `DNS_RESOLUTION_FAILED` betyr navneoppslag, `ROBOTS_UNAVAILABLE` betyr at tilgangsreglene ikke kunne kontrolleres, `ROBOTS_DISALLOWED` betyr eksplisitt forbud, og `PLAYWRIGHT_NAVIGATION_FAILED` betyr nettlesernavigasjonsfeil. En grønn nettverksdiagnose beviser **ikke** at alle løp og hestehistorikk kan parses.
+### Beslutningsregler
+
+| Funn | Betydning | Neste handling |
+|---|---|---|
+| DNS/TLS feiler | Miljø-/nettverksproblem | Test i et annet autorisert miljø |
+| robots 404/410 | Fil mangler; ikke eksplisitt Disallow | Fortsett én kontrollert forespørsel |
+| robots 5xx, nettfeil eller Disallow | Tilgang ikke verifisert eller ikke tillatt | Stopp. Ikke omgå begrensninger |
+| HTTP 200, browser feiler | Ulik behandling av klient eller JS | Les browserfeil, screenshot og URL |
+| Browser viser program, parser finner null hester | Parser/dataformatproblem | Sammenlign rå HTML/tekst før endring |
+| PDF 200 og lesbar tekst | Mulig alternativt programgrunnlag | Valider hestene og historikken |
+| PDF 404 eller ikke PDF | Den aktuelle PDF-kandidaten finnes ikke | Bruk HTML/Chromium eller manuelt program |
+| Ingen metode virker | Årsaken gjenstår | Bevar logg og undersøk tilgangsvilkår/kildeendring |
+
+Lokalt kan du kjøre:
+
+```bash
+python -m pip install -r requirements-dev.txt
+python -m playwright install chromium
+python -m pytest -q
+python -m collector.diagnose --strategy all \
+  --url 'https://www.rikstoto.no/Spill/OR_NR_2026-10-18/V?race=6&p=6:0' \
+  --out diagnostics/report.json
+```
+
+Rikstoto har offentlig indekserte PDF-er som
+`/api/programdownload/ProgramPdf/Utvidet/OR_NR_2024-09-22`. Diagnosen
+**avleder én kandidat** fra en konkret, brukeroppgitt møte-ID. Den verken
+søker gjennom ukjente møte-ID-er eller påstår at PDF for 18.10.2026 finnes.
+Automatiseringen bruker ikke innlogging, sesjonscookies eller spillkonto.
+
