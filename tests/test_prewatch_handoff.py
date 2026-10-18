@@ -117,3 +117,19 @@ def test_preserves_longer_trip_comment_without_claiming_full_source(tmp_path):
     body = (dest / result["meeting_feeds"][0]["markdown_name"]).read_text(encoding="utf-8")
     assert "outside leader with no cover" in body
     assert "Raw previous-start lines are limited excerpts" in body
+
+
+def test_snapshot_readiness_flags_partial_meeting_without_claiming_bet(tmp_path):
+    root = write_fixture(tmp_path)
+    manifest = next(root.glob("*/*/manifest.json"))
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["meetings"][0]["startlist_pdf_audit"]["status"] = "PARTIAL_OR_UNVERIFIED"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    dest = tmp_path / "handoff"
+    index = build_handoff(root, dest)
+    part = index["meeting_feeds"][0]
+    assert part["source_ready_snapshot"] is False
+    assert part["source_blocker"] == "PDF_STARTLIST_NOT_FULLY_RECONCILED"
+    body = (dest / part["markdown_name"]).read_text(encoding="utf-8")
+    assert "Source ready snapshot=False" in body
+    assert "NO WIN" not in body or "NOT a fresh WIN market" in body
