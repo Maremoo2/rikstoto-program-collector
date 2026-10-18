@@ -12,6 +12,8 @@ on:
       - 'collector/calendar_audit.py'
       - 'collector/homepage_schedule.py'
       - 'collector/release_archive.py'
+      - 'collector/prewatch_handoff.py'
+      - 'tests/test_prewatch_handoff.py'
       - 'collector/startlist_audit.py'
       - 'collector/parsing.py'
       - 'tests/test_daily.py'
@@ -178,6 +180,11 @@ jobs:
         with:
           name: rikstoto-morning-programs
           path: daily-artifact
+      - name: Build Pre-Watch read-only source feeds for Norwegian/Swedish races
+        run: |
+          python -m collector.prewatch_handoff \
+            --root daily-artifact/output/daily \
+            --dest prewatch_feed
       - name: Build an immutable archive and SHA-256 checksum
         id: package
         run: |
@@ -196,6 +203,11 @@ jobs:
           RELEASE_DATE: ${{ steps.package.outputs.date }}
         run: |
           set -euo pipefail
+          # This release is only a DRAFT visible to the authenticated owner.
+          # Release.body also contains a compact index so ChatGPT Pre-Watch
+          # can find the exact immutable meeting feed by run and date.
+          printf '\n\n' >> "$RELEASE_NOTES"
+          cat prewatch_feed/index.md >> "$RELEASE_NOTES"
           if ! gh release view "$RELEASE_TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
             gh release create "$RELEASE_TAG" "$ZIP_FILE" "$HASH_FILE" \
               --repo "$GH_REPO" --target "$GITHUB_SHA" \
@@ -214,3 +226,31 @@ jobs:
             done
           fi
           gh release view "$RELEASE_TAG" --repo "$GH_REPO" --json url --jq '.url' >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish immutable read-only Pre-Watch meeting feeds as draft Releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          python - <<'PY' > /tmp/prewatch_release_manifest.tsv
+          import json
+          from pathlib import Path
+          index = json.loads(Path("prewatch_feed/index.json").read_text(encoding="utf-8"))
+          for item in index["meeting_feeds"]:
+              print(item["release_tag"] + "\t" + item["markdown_name"])
+          PY
+          while IFS=
+\t' read -r release_tag note_file; do
+            test -n "$release_tag" || continue
+            if gh release view "$release_tag" --repo "$GH_REPO" >/dev/null 2>&1; then
+              echo "Pre-Watch draft exists; no overwrite: $release_tag"
+            else
+              gh release create "$release_tag" --repo "$GH_REPO" \
+                --target "$GITHUB_SHA" --title "$release_tag" \
+                --notes-file "prewatch_feed/$note_file" \
+                --draft --prerelease --latest=false
+            fi
+          done < /tmp/prewatch_release_manifest.tsv
+          echo "Pre-Watch read-only draft feeds created or found:"
+          wc -l < /tmp/prewatch_release_manifest.tsv
+
