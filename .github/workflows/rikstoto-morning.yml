@@ -138,7 +138,7 @@ jobs:
     needs: [full-day]
     # Only the scheduled daily archive and explicitly opted-in manual runs
     # get permanent release assets. Push-triggered smoke tests never publish.
-    if: ${GH} always() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.persist_archive == true)) }}
+    if: ${{ always() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.persist_archive == true)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     permissions:
@@ -165,13 +165,13 @@ jobs:
             --github-output "$GITHUB_OUTPUT"
       - name: Publish date release (keep individual run ZIPs unchanged)
         env:
-          GH_TOKEN: ${GH} github.token }}
-          GH_REPO: ${GH} github.repository }}
-          RELEASE_TAG: ${GH} steps.package.outputs.tag }}
-          ZIP_FILE: ${GH} steps.package.outputs.archive }}
-          HASH_FILE: ${GH} steps.package.outputs.checksum }}
-          RELEASE_NOTES: ${GH} steps.package.outputs.notes }}
-          RELEASE_DATE: ${GH} steps.package.outputs.date }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ steps.package.outputs.tag }}
+          ZIP_FILE: ${{ steps.package.outputs.archive }}
+          HASH_FILE: ${{ steps.package.outputs.checksum }}
+          RELEASE_NOTES: ${{ steps.package.outputs.notes }}
+          RELEASE_DATE: ${{ steps.package.outputs.date }}
         run: |
           set -euo pipefail
           if ! gh release view "$RELEASE_TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
