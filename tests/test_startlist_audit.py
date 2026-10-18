@@ -100,4 +100,6 @@ def test_number_mismatch_diagnostics_do_not_approve_race():
     mismatch = audit["mismatches"][0]
     assert mismatch["missing_in_pdf"] == [3]
     assert mismatch["missing_in_startlist"] == [2]
+    assert mismatch["missing_in_pdf_source_rows"] == [
+        {"number": 3, "horse_name": "Lesja Loke", "isScratched": True}]
     assert audit["status"] == "PARTIAL_OR_UNVERIFIED"
