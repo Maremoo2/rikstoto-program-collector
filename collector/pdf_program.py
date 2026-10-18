@@ -28,7 +28,7 @@ def _horse_header(line: str) -> tuple[int, str, str] | None:
         return None
     number, name, driver = match.groups()
     letters = [c for c in name if c.isalpha()]
-    if len(letters) < 3 or sum(ch.isupper() for ch in letters) / len(letters) < .78:
+    if (len(letters) < 3 and not re.fullmatch(r'(?:[A-Z]\\.){2,}', name.strip())) or not letters or sum(ch.isupper() for ch in letters) / len(letters) < .78:
         return None
     return int(number), name.strip(), driver.strip()
 
