@@ -116,6 +116,10 @@ def build_handoff(root: Path, dest: Path):
         if current != header:
             chunks.append(current)
         for number, text in enumerate(chunks, 1):
+            race_numbers_in_part = [
+                int(line.split(" | ", 1)[0].split()[-1])
+                for line in text.splitlines() if line.startswith("### Race ")
+            ]
             tag = f"prewatch-src-{day}-{mid}-p{number}-{run_id}"
             name = f"prewatch_{mid}_p{number}.md"
             (dest / name).write_text(text, encoding="utf-8")
@@ -124,7 +128,8 @@ def build_handoff(root: Path, dest: Path):
                 "track": meeting["listing_source"].get("track"),
                 "part": number, "parts": len(chunks),
                 "release_tag": tag, "markdown_name": name,
-                "race_count": text.count("\n### Race "),
+                "race_count": len(race_numbers_in_part),
+                "race_numbers": race_numbers_in_part,
                 "body_length": len(text),
                 "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
                 "meeting_source_status": meeting.get("startlist_pdf_audit", {}).get("status"),
@@ -146,7 +151,7 @@ def build_handoff(root: Path, dest: Path):
         "Meeting source-release tags:",
     ]
     for item in index["meeting_feeds"]:
-        lines.append(f"- {item['release_tag']} | {item['race_count']} races"
+        lines.append(f"- {item['release_tag']} | race_numbers={item['race_numbers']}"
                      f" | sha256={item['sha256'][:16]}")
     lines += [
         "",
