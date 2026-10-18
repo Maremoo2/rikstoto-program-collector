@@ -99,6 +99,35 @@ jobs:
           if [ -n "$SELECTED_DATE" ]; then args+=(--date "$SELECTED_DATE"); fi
           if [ -n "$SEED_MEETING" ]; then args+=(--seed-meeting "$SEED_MEETING"); fi
           python -m collector.daily "${args[@]}" 2>&1 | tee daily-console.log
+      - name: Detail unresolved PDF/startlist discrepancies
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          items = sorted(Path("output/daily").glob("*/*/manifest.json"))
+          if not items:
+              print("SOURCE_AUDIT_DIAGNOSTICS: NO_MANIFEST")
+          else:
+              manifest = json.loads(items[-1].read_text(encoding="utf-8"))
+              messages = []
+              for meeting in manifest.get("meetings", []):
+                  audit = meeting.get("startlist_pdf_audit") or {}
+                  status = audit.get("status", "NOT_AVAILABLE")
+                  if status in ("MATCHED_AS_OF_SNAPSHOT", "COMPOSITE_OR_UNAVAILABLE"):
+                      continue
+                  name = meeting.get("meeting_id", "UNKNOWN_MEETING")
+                  detail = audit.get("mismatches") or ["NO_DETAILED_MISMATCH_AVAILABLE"]
+                  messages.append(f"- {name} | {status} | verified_horses={audit.get('horses_verified', 0)}")
+                  for mismatch in detail[:25]:
+                      messages.append("  - " + json.dumps(mismatch, ensure_ascii=False, sort_keys=True)[:1000])
+                  if len(detail) > 25:
+                      messages.append(f"  - {len(detail)-25} additional discrepancies omitted; see manifest")
+              print("SOURCE_AUDIT_DIAGNOSTICS: " + ("\n".join(messages) if messages else "NO_UNRESOLVED_INDEPENDENT_MEETINGS"))
+              with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+                  f.write("\n### PDF/startlist discrepancies (no automatic approval)\n\n")
+                  f.write("\n".join(messages) + "\n" if messages else "No unresolved independent meetings found.\n")
+          PY
       - name: Summarize meetings, PDFs and scratchings
         if: always()
         run: |
