@@ -20,6 +20,7 @@ def main() -> None:
     live.add_argument("--browser-pdf", action="store_true")
     live.add_argument("--browser-executable", help="Use an existing local Chromium binary")
     live.add_argument("--official-pdf", action="store_true")
+    live.add_argument("--only-source-race", action="store_true", help="Fetch exactly the supplied source race (no race discovery/probing)")
     live.add_argument("--robots-policy", choices=["strict", "warn"], default="strict",
                       help="Warn allows proceeding only if robots.txt cannot be retrieved; denied paths stay denied")
     offline = sub.add_parser("parse", help="Offline parse a saved body text (.txt)")
@@ -35,7 +36,8 @@ def main() -> None:
             seed_urls=args.seed_url, out=args.out, browser_pdf=args.browser_pdf,
             official_pdf=args.official_pdf, scan_races=args.scan_races,
             expected_races=args.expected_races, delay_s=args.delay, robots_policy=args.robots_policy,
-            browser_executable=args.browser_executable))
+            browser_executable=args.browser_executable,
+            only_source_race=args.only_source_race))
     else:
         folder = parse_offline(args.text_file,args.url,args.out,expected_horses=args.expected_horses)
     print(f"Output: {folder}")
