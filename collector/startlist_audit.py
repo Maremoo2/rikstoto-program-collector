@@ -71,11 +71,21 @@ def reconcile_startlist(pdf_races: list[dict[str, Any]], source: Any,
         pdf_horses = {h.get("program_number"): h for h in doc["entrants"]}
         if malformed or len(pdf_horses) != len(doc["entrants"]) or set(api_horses) != set(pdf_horses):
             audit["mismatches"].append({"code": "HORSE_NUMBER_OR_FLAG_MISMATCH", "race": race_no,
-                                        "expected": sorted(api_horses), "actual": sorted(pdf_horses)})
+                                        "expected": sorted(api_horses), "actual": sorted(pdf_horses),
+                                        "missing_in_pdf": sorted(set(api_horses) - set(pdf_horses)),
+                                        "missing_in_startlist": sorted(set(pdf_horses) - set(api_horses)),
+                                        "malformed_api_rows": malformed})
             continue
         if any(normalized_horse_name(pdf_horses[n]["name"]) !=
                normalized_horse_name(api_horses[n]["horseName"]) for n in api_horses):
-            audit["mismatches"].append({"code": "HORSE_NAME_MISMATCH", "race": race_no})
+            audit["mismatches"].append({"code": "HORSE_NAME_MISMATCH", "race": race_no,
+                                        "differences": [
+                                            {"number": n, "pdf_name": pdf_horses[n]["name"],
+                                             "startlist_name": api_horses[n]["horseName"]}
+                                            for n in sorted(api_horses)
+                                            if normalized_horse_name(pdf_horses[n]["name"]) !=
+                                               normalized_horse_name(api_horses[n]["horseName"])
+                                        ]})
             continue
 
         # Only after FULL identity and schema agreement is scratch state set.
