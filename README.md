@@ -35,7 +35,7 @@ python -m collector collect \
   --scan-races 15 --browser-pdf --official-pdf
 ```
 
-Other tracks must also be discoverable from the day page, or supplied via additional `--seed-url` arguments. The tool does not invent unknown venue/meeting IDs. If the source's HTML or access policies change, the collector saves what it can and flags failed races. Never infer that `--scan-races 15` means the date contains exactly 15 races.
+Other tracks must also be discoverable from the day page, or supplied via additional `--seed-url` arguments. The tool does not invent unknown venue/meeting IDs. For local Linux Chromium installations, pass `--browser-executable /usr/bin/chromium` if the Playwright-managed browser is not installed. If the source's HTML or access policies change, the collector saves what it can and flags failed races. Never infer that `--scan-races 15` means the date contains exactly 15 races.
 
 To limit the initial check to the supplied race:
 
@@ -46,7 +46,7 @@ python -m collector collect \
   --scan-races 0
 ```
 
-Rikstoto is a dynamic site; browser captures may fail or omit data. Default robots policy is **strict**: if permission can't be established, the run stops. `--robots-policy warn` changes only handling of an unavailable robots file, not explicit disallow rules; first review the site's terms/permission. Do not evade site restrictions.
+Rikstoto is a dynamic site; browser captures may fail or omit data. Default robots policy is **strict**: if permission can't be established, no site pages are requested and an auditable `REVIEW_REQUIRED` output is generated. `--robots-policy warn` changes only handling of an unavailable robots file, not explicit disallow rules; first review the site's terms/permission. Do not evade site restrictions.
 
 ## Offline parsing and QA
 
