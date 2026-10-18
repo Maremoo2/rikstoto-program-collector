@@ -74,7 +74,10 @@ class Robots:
         self.parser, self.policy, self.status = parser, policy, status
 
     def permits(self, url: str) -> bool:
-        if self.policy == "warn" and self.parser is None:
+        # RFC 9309 2.3.1.3: a confirmed 404/410 robots.txt is unavailable,
+        # not a Disallow rule. Network errors, 5xx and rate limits fail closed.
+        # "warn" never bypasses explicit disallow or unresolved network errors.
+        if self.status in ("missing_http_404", "missing_http_410"):
             return True
         return self.parser is not None and self.parser.can_fetch(USER_AGENT, url)
 
@@ -82,6 +85,8 @@ class Robots:
 async def check_robots(context, policy: str) -> Robots:
     try:
         response = await context.request.get(f"https://{DOMAIN}/robots.txt", timeout=15000)
+        if response.status in (404, 410):
+            return Robots(None, policy, f"missing_http_{response.status}")
         if response.status != 200:
             return Robots(None, policy, f"robots_http_{response.status}")
         text = await response.text()
@@ -89,7 +94,7 @@ async def check_robots(context, policy: str) -> Robots:
         parser.parse(text.splitlines())
         return Robots(parser, policy, "checked")
     except Exception as exc:
-        return Robots(None, policy, f"robots_error: {type(exc).__name__}")
+        return Robots(None, policy, f"robots_error: {type(exc).__name__}: {str(exc)[:300]}")
 
 
 def html_tables(html: str) -> list[dict[str, Any]]:
@@ -209,7 +214,12 @@ async def collect(*, date: str, source_url: str, seed_urls: list[str],
                                              accept_downloads=False)
         page = await context.new_page()
         robots = await check_robots(context, robots_policy)
-        payload["robots"] = {"status": robots.status, "policy": robots_policy}
+        payload["robots"] = {"status": robots.status, "policy": robots_policy,
+                             "access_decision": "proceed" if robots.permits(source_url) else "stop"}
+        if robots.status.startswith("missing_http_"):
+            payload["discovery"]["notes"].append(
+                "robots.txt returned 404/410; treated as unavailable under RFC 9309, "
+                "not as an explicit Disallow. Separate website terms still apply.")
         if not robots.permits(source_url):
             payload["captures"].append({"url": source_url, "status": "robots_blocked",
                                         "captured_at_utc": now(), "error": robots.status})
