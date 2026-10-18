@@ -237,10 +237,9 @@ jobs:
           from pathlib import Path
           index = json.loads(Path("prewatch_feed/index.json").read_text(encoding="utf-8"))
           for item in index["meeting_feeds"]:
-              print(item["release_tag"] + "\t" + item["markdown_name"])
+              print(item["release_tag"] + "|" + item["markdown_name"])
           PY
-          while IFS=
-\t' read -r release_tag note_file; do
+          while IFS='|' read -r release_tag note_file; do
             test -n "$release_tag" || continue
             if gh release view "$release_tag" --repo "$GH_REPO" >/dev/null 2>&1; then
               echo "Pre-Watch draft exists; no overwrite: $release_tag"
