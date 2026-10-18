@@ -86,3 +86,11 @@ python -m pytest -q
 ## Limitations still requiring a live-site acceptance test
 
 The site could not be retrieved from the development environment. Therefore: (1) the current parsing rules are tested against the layout you supplied, not a real fetched browser capture; (2) fully reliable discovery across **all meetings** on a day is unverified; (3) shoe/wagon data and some prior-start fields are retained in raw HTML/text when they cannot be safely assigned; (4) official PDF downloads depend on actual links and access permissions. Fixes should be made from saved captures and regression fixtures, never guesses.
+
+## Diagnose nettverkstilgang (GitHub Actions)
+
+Åpne **Actions → Rikstoto connectivity diagnostics → Run workflow**. Jobben kjører DNS-, HTTP-, robots- og (hvis tillatt) Playwright-sjekk i GitHub-hostet Ubuntu. Den kjører også ved endringer i diagnosekoden og hver mandag. Den gjør ingen innlogging, omgår ingen tilgangsbegrensninger og lagrer ikke innhold fra programmet.
+
+Les tabellen i **Job summary**. Last ned artefakten `rikstoto-diagnostics` for `report.json` med tidsstempel, feilkoder og forklaringer. Rødt resultat betyr at en forutsetning feilet, ikke nødvendigvis at Rikstoto-parseren er ødelagt.
+
+Lokalt: `python -m collector.diagnose --browser --out diagnostics/report.json` (krever Playwright/Chromium). `DNS_RESOLUTION_FAILED` betyr navneoppslag, `ROBOTS_UNAVAILABLE` betyr at tilgangsreglene ikke kunne kontrolleres, `ROBOTS_DISALLOWED` betyr eksplisitt forbud, og `PLAYWRIGHT_NAVIGATION_FAILED` betyr nettlesernavigasjonsfeil. En grønn nettverksdiagnose beviser **ikke** at alle løp og hestehistorikk kan parses.
