@@ -32,7 +32,7 @@ on:
         required: false
         type: string
       persist_archive:
-        description: "Save this manual run as durable public GitHub Release assets (ZIP and SHA-256)"
+        description: "Save this manual run as private-to-collaborators GitHub draft Release (ZIP + SHA-256)"
         required: false
         type: boolean
         default: true
@@ -156,7 +156,7 @@ jobs:
           exit 1
 
   persist:
-    name: Save public source archive as GitHub Release
+    name: Save privately accessible draft archive in GitHub Releases
     needs: [full-day]
     # Normally only schedule/manual captures publish. A single explicitly
     # marked bootstrap commit may also publish today's real-source snapshot.
@@ -200,7 +200,7 @@ jobs:
             gh release create "$RELEASE_TAG" "$ZIP_FILE" "$HASH_FILE" \
               --repo "$GH_REPO" --target "$GITHUB_SHA" \
               --title "Rikstoto programarkiv $RELEASE_DATE" \
-              --notes-file "$RELEASE_NOTES" --prerelease --latest=false
+              --notes-file "$RELEASE_NOTES" --draft --prerelease --latest=false
           else
             # An existing archive must never be silently overwritten.
             for asset in "$ZIP_FILE" "$HASH_FILE"; do
