@@ -158,9 +158,9 @@ jobs:
   persist:
     name: Save public source archive as GitHub Release
     needs: [full-day]
-    # Only the scheduled daily archive and explicitly opted-in manual runs
-    # get permanent release assets. Push-triggered smoke tests never publish.
-    if: ${{ always() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.persist_archive == true)) }}
+    # Normally only schedule/manual captures publish. A single explicitly
+    # marked bootstrap commit may also publish today's real-source snapshot.
+    if: ${{ always() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.persist_archive == true) || (github.event_name == 'push' && contains(github.event.head_commit.message, '[archive-now]'))) }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     permissions:
