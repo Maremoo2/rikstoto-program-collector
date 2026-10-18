@@ -140,3 +140,18 @@ def test_source_readiness_and_blocked_race_counts(tmp_path):
     body = (tmp_path / "blocked" / part["markdown_name"]).read_text(encoding="utf-8")
     assert "Source ready snapshot=False" in body
     assert "Source blocker=PDF_STARTLIST_NOT_FULLY_RECONCILED" in body
+
+
+def test_race_queue_exposes_review_blockers_without_bet_inference(tmp_path):
+    root = write_fixture(tmp_path)
+    result = build_handoff(root, tmp_path / "handoff")
+    assert len(result["race_queue"]) == 1
+    race = result["race_queue"][0]
+    assert race["race_key"] == "OR_NR_2026-10-18|6"
+    assert race["runner_count"] == 1
+    assert race["history_rows"] == 2
+    assert "RACE_QA_WARNINGS_REVIEW" in race["source_blockers"]
+    assert result["queue_ready_races"] == 0
+    assert result["queue_review_races"] == 1
+    assert "BET" not in race
+    assert "p_win" not in race
