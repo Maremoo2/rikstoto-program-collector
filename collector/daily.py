@@ -256,12 +256,8 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18):
                     (f"https://{DOMAIN}/api/racedays/multiTracks", "multitracks"),
                 ]
                 meeting_set = set()
-                for url, label in sources:
-                    data = await request(ctx, robots, url, folder / f"discovery_{label}.json", logs)
-                    ids = meeting_ids(data, day) if data is not None else []
-                    manifest["discoveries"].append({"source": label, "url": url,
-                                                    "meeting_ids": ids, "received": data is not None})
-                    meeting_set.update(ids)
+                # Initialize a real browser session first so its public
+                # cookies and compatible headers are present for API requests.
                 # Browser fallback discovers meeting IDs actually embedded in
                 # current date-selected front page; it never fabricates IDs.
                 page = await ctx.new_page()
@@ -282,6 +278,12 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18):
                     warnings.append(f"HOMEPAGE_BROWSER_FAILED:{type(exc).__name__}")
                 finally:
                     await page.close()
+                for url, label in sources:
+                    data = await request(ctx, robots, url, folder / f"discovery_{label}.json", logs)
+                    ids = meeting_ids(data, day) if data is not None else []
+                    manifest["discoveries"].append({"source": label, "url": url,
+                                                    "meeting_ids": ids, "received": data is not None})
+                    meeting_set.update(ids)
                 if not meeting_set:
                     warnings.append("NO_MEETING_IDS_DISCOVERED_FROM_OFFICIAL_SOURCES")
                 if len(meeting_set) > max_meetings:
