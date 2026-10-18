@@ -1,5 +1,5 @@
 name: Daily Rikstoto full programs – 07 Oslo
-# 2026-10-19 focused quality-control run with exact PDF/startlist diagnostics.
+# Recheck 2026-10-19 using the tested initial-only horse-name parser.
 
 on:
   schedule:
