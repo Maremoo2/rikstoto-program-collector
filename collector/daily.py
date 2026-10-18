@@ -23,6 +23,7 @@ from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from .pipeline import DOMAIN, USER_AGENT, check_robots, source_allowed
+from .pdf_program import parse_extended_pdf
 
 OSLO = ZoneInfo("Europe/Oslo")
 MEETING_ID = re.compile(r"\b[A-Z0-9]{1,14}_[A-Z]{2,4}_(20\d{2}-\d{2}-\d{2})\b", re.I)
@@ -226,6 +227,7 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18):
     folder = Path(out) / day / run
     folder.mkdir(parents=True, exist_ok=False)
     logs, warnings = [], []
+    structured_races = []
     manifest = {
         "date_oslo": day, "created_utc": utcnow(), "run_id": run,
         "purpose": "public program and scratches morning snapshot",
@@ -311,6 +313,51 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18):
                         record["pdf_analysis"] = extract_pdf(raw_pdf, mdir)
                         record["program_pdf"] = (
                             "PDF_TEXT_OK" if record["pdf_analysis"]["readable"] else "PDF_UNREADABLE")
+                        if record["pdf_analysis"]["readable"]:
+                            parsed_program = parse_extended_pdf(
+                                (mdir / "full_program.txt").read_text(encoding="utf-8"),
+                                meeting_id=meeting, date=day,
+                                url=pdf_url, captured_at=utcnow())
+                            record["pdf_structure"] = parsed_program["qa"]
+                            dump(mdir / "structured_program.json", parsed_program)
+                            structured_races.extend(parsed_program["races"])
+                            pdf_races = parsed_program["qa"].get("race_numbers", [])
+                            record["pdf_race_numbers"] = pdf_races
+                            record["parsed_horses"] = parsed_program["qa"].get("horses", 0)
+                            record["parsed_history_rows"] = parsed_program["qa"].get("history_rows", 0)
+                            if not pdf_races:
+                                warnings.append(f"PDF_RACE_EXTRACTION_FAILED:{meeting}")
+                            if record["race_numbers"] and set(record["race_numbers"]) != set(pdf_races):
+                                warnings.append(f"STARTLIST_PDF_RACE_MISMATCH:{meeting}")
+                            if not record["race_numbers"]:
+                                warnings.append(f"RACE_COUNT_UNVERIFIED_AGAINST_STARTLIST:{meeting}")
+                            # Preserve explicit positive scratch events and avoid
+                            # incorrectly declaring everyone else 'not scratched'.
+                            scratch_events = scratch["positive_scratches"] if starts is not None else []
+                            for doc in parsed_program["races"]:
+                                assigned = []
+                                for event in scratch_events:
+                                    if str(event.get("race_number")) != str(doc["race"]["race_number"]):
+                                        continue
+                                    for horse in doc["entrants"]:
+                                        if ((event.get("horse_number") is not None and
+                                             str(horse["program_number"]) == str(event["horse_number"]))
+                                                or (event.get("horse_name") and
+                                                    horse["name"].casefold() == str(event["horse_name"]).casefold())):
+                                            horse["scratched"] = True
+                                            horse["scratch_state"] = "SCRATCHED_CONFIRMED_BY_STARTLIST"
+                                            assigned.append({"horse_number": horse["program_number"],
+                                                             "horse_name": horse["name"],
+                                                             "race_number": doc["race"]["race_number"]})
+                                            break
+                                doc["scratches"] = assigned
+                                doc["qa"]["scratched_count"] = len(assigned) if assigned else None
+                                # Never infer all other runners are active from
+                                # a positive-only scratch-status extraction.
+                                doc["qa"]["active_count"] = None
+                                doc["qa"]["scratch_verification"] = "positive_only"
+                            # Update structured file after matching positive scratches.
+                            dump(mdir / "structured_program.json", parsed_program)
                     else:
                         record["program_pdf"] = "SOURCE_UNAVAILABLE"
                         warnings.append(f"FULL_PROGRAM_PDF_UNAVAILABLE:{meeting}")
@@ -349,6 +396,9 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18):
                 "scratch_status_sources_with_flags": sum(
                     r["scratching_status"] == "EXPLICIT_FLAGS_OBSERVED"
                     for r in manifest["meetings"]),
+                "pdf_races_parsed": len(structured_races),
+                "pdf_horses_parsed": sum(len(doc["entrants"]) for doc in structured_races),
+                "pdf_history_rows": sum(doc["qa"]["past_start_rows"] for doc in structured_races),
             }
             # Even a complete-looking snapshot remains unverified until the
             # official full daily schedule has been independently reconciled.
@@ -362,6 +412,17 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18):
         warnings.append(f"FATAL:{type(exc).__name__}:{str(exc)[:350]}")
         manifest["status"] = "ERROR"
     finally:
+        dump(folder / "structured_program_day.json", {
+            "date": day, "run_id": run, "source_type": "official_extended_pdf",
+            "races": structured_races, "counts": {
+                "races": len(structured_races),
+                "horses": sum(len(doc["entrants"]) for doc in structured_races),
+                "prior_starts": sum(doc["qa"]["past_start_rows"] for doc in structured_races)},
+            "status": "UNVERIFIED",
+            "limitations": ["Scratches and race-day changes may occur after snapshot.",
+                            "Only discovered meetings; full date coverage unverified.",
+                            "Past start fields retain raw official PDF text if ambiguous."]
+        })
         dump(folder / "manifest.json", manifest)
         print(f"DAILY_STATUS={manifest['status']} MEETINGS={len(manifest['meetings'])} "
               f"PDFS={manifest.get('counts',{}).get('full_program_pdfs',0)} "
