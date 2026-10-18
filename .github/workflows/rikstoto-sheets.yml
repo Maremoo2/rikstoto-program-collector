@@ -1,0 +1,42 @@
+name: Rikstoto source inbox to PreWatch Sheets
+
+on:
+  workflow_run:
+    workflows: ["Daily Rikstoto full programs – 07 Oslo"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: rikstoto-sheets-bridge
+  cancel-in-progress: false
+
+jobs:
+  import:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Google Sheets client
+        run: python -m pip install 'google-api-python-client>=2.150,<3' 'google-auth>=2.35,<3'
+      - name: Download matching collector artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+        run: gh run download "$RUN_ID" --name rikstoto-morning-programs --dir downloaded
+      - name: Validate source without writing
+        run: python -m collector.sheets_bridge --root downloaded/output/daily --dry-run
+      - name: Import source-only snapshots with readback
+        env:
+          GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.PREWATCH_GOOGLE_SERVICE_ACCOUNT_JSON }}
+          PREWATCH_SPREADSHEET_ID: ${{ vars.PREWATCH_SPREADSHEET_ID }}
+        run: |
+          test -n "$GOOGLE_SERVICE_ACCOUNT_JSON" || { echo 'Missing service-account secret' >&2; exit 1; }
+          test -n "$PREWATCH_SPREADSHEET_ID" || { echo 'Missing spreadsheet-ID variable' >&2; exit 1; }
+          python -m collector.sheets_bridge --root downloaded/output/daily
