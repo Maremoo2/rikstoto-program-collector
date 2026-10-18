@@ -9,10 +9,10 @@ import re
 from datetime import datetime
 from typing import Any
 
-START = re.compile(r"^\s*START\s+KL\.?\s*(\d{1,2}:\d{2})\s*$", re.I)
+START = re.compile(r"START\s+KL\.?\s*(\d{1,2}:\d{2})", re.I)
 RACE = re.compile(r"\bLøp\s+(\d{1,2})\b", re.I)
 HORSE = re.compile(r"^\s*(\d{1,2})\s+([^,\n]{2,90}),\s+(.+)$")
-HISTORY = re.compile(r"\b(\d{2}\.\d{2}\.\d{2})-(\d{1,2})\|")
+HISTORY = re.compile(r"\b(\d{2}\.\d{2}\.\d{2})-(\d{1,2})(?=\||\s)")
 FOOTER = re.compile(r"\bUtvidet\s*-\s*rikstoto\.no\b", re.I)
 DISTANCE = re.compile(r"\b(\d{3,4})\s*m\s+(Voltestart|Autostart)\b", re.I)
 
@@ -46,24 +46,32 @@ def parse_extended_pdf(text: str, *, meeting_id: str, date: str,
             "PDF_DATE_MISMATCH" if pdf_date else "PDF_DATE_UNVERIFIED"],
             "document_date": pdf_date, "race_sections": 0}}
     lines = text.splitlines()
-    indices = [(i, m.group(1)) for i, line in enumerate(lines)
-               if (m := START.match(line))]
+    # Swedish and French programs append START KL to narrative text.
+    indices = [(i, m.group(1), line[:m.start()]) for i, line in enumerate(lines)
+               if (m := START.search(line))]
     tracks = re.search(r"^(.+?)\s+\d{2}\.\d{2}\.20\d{2}\s+Utvidet", text, re.M)
     track = track or (tracks.group(1) if tracks else None)
     docs = []
     race_numbers_seen = set()
-    for ordinal, (start_index, time) in enumerate(indices, 1):
+    for ordinal, (start_index, time, marker_prefix) in enumerate(indices, 1):
         next_start = indices[ordinal][0] if ordinal < len(indices) else len(lines)
-        heading = lines[max(0, start_index - 12):start_index]
+        # Source heading may identify race as 'Løp N' or standalone N.
+        # Restrict to final header lines; exclude previous race history.
+        heading = lines[max(0, start_index - 13):start_index] + [marker_prefix]
         found = [(int(m.group(1)), line) for line in heading
                  if (m := RACE.search(line))]
         if found:
             race_num = found[-1][0]
             number_source = "pdf_heading"
         else:
-            first_page = [l.strip() for l in lines[:max(1, start_index)]]
-            race_num = int(first_page[0]) if ordinal == 1 and first_page and first_page[0].isdigit() else ordinal
-            number_source = "pdf_first_page" if ordinal == 1 and first_page and first_page[0].isdigit() else "pdf_order_inferred"
+            standalone = [int(x.strip()) for x in heading
+                          if re.fullmatch(r"\\s*\\d{1,2}\\s*", x) and 1 <= int(x.strip()) <= 30]
+            if standalone:
+                race_num = standalone[-1]
+                number_source = "pdf_heading_number"
+            else:
+                race_num = ordinal
+                number_source = "pdf_order_inferred"
         headers = [(i, x) for i in range(start_index + 1, next_start)
                    if (x := _horse_header(lines[i])) is not None]
         entrants: list[dict[str, Any]] = []
