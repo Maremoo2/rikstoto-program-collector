@@ -9,6 +9,7 @@ on:
     paths:
       - 'collector/daily.py'
       - 'collector/pdf_program.py'
+      - 'collector/parsing.py'
       - 'tests/test_daily.py'
       - 'tests/test_pdf_program.py'
       - '.github/workflows/rikstoto-morning.yml'
