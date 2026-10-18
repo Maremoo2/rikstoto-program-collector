@@ -231,8 +231,12 @@ def diagnostic_browser(stages, url, out_folder):
                     meeting = meeting_match.group(1)
                     if (parsed.path == f"/api/racedays/{meeting}/starts"
                         or parsed.path.startswith(f"/api/game/program/{meeting}/")):
-                        if response.status == 200 and len(api_matches) < 4:
+                        if response.status == 200 and len(api_matches) < 8:
                             api_matches.append(response)
+                if (parsed.path == "/api/racedays/multiTracks"
+                        or re.fullmatch(r"/api/racedays/dates/20\d{2}-\d{2}-\d{2}/20\d{2}-\d{2}-\d{2}", parsed.path)):
+                    if response.status == 200 and len(api_matches) < 8:
+                        api_matches.append(response)
                 if len(requests) < 60:
                     requests.append({"url_without_query": urlunparse((parsed.scheme, parsed.netloc,
                                                                       parsed.path, "", "", "")),
@@ -244,7 +248,15 @@ def diagnostic_browser(stages, url, out_folder):
                 page.wait_for_timeout(3500)
                 api_saved = []
                 for source in api_matches:
-                    name = "program" if "/api/game/program/" in urlparse(source.url).path else "starts"
+                    endpoint_path = urlparse(source.url).path
+                    if "/api/game/program/" in endpoint_path:
+                        name = "program"
+                    elif "/dates/" in endpoint_path:
+                        name = "racedays"
+                    elif endpoint_path.endswith("/multiTracks"):
+                        name = "multitracks"
+                    else:
+                        name = "starts"
                     name = f"api_{name}.json"
                     if (out_folder / name).exists():
                         continue
