@@ -148,8 +148,7 @@ async def request(ctx, robots, url, path: Path, log, *, binary=False):
         return None
     await asyncio.sleep(1.25)
     try:
-        reply = await ctx.request.get(url, timeout=24000, max_redirects=3,
-                                      headers={"User-Agent": USER_AGENT})
+        reply = await ctx.request.get(url, timeout=24000, max_redirects=3)
         status = reply.status
         ct = reply.headers.get("content-type", "")
         if status != 200:
