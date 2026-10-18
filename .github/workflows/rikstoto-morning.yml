@@ -18,6 +18,10 @@ on:
         description: "Optional YYYY-MM-DD; blank means today in Norway"
         required: false
         type: string
+      seed_meeting:
+        description: "Optional known meeting ID (e.g. OR_NR_2026-10-18); does not verify full discovery"
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -32,6 +36,7 @@ jobs:
     timeout-minutes: 45
     env:
       SELECTED_DATE: ${{ inputs.date || '' }}
+      SEED_MEETING: ${{ inputs.seed_meeting || '' }}
       TZ: Europe/Oslo
     steps:
       - name: Checkout
@@ -51,11 +56,10 @@ jobs:
         continue-on-error: true
         run: |
           set -o pipefail
-          if [ -n "$SELECTED_DATE" ]; then
-            python -m collector.daily --date "$SELECTED_DATE" --out output/daily 2>&1 | tee daily-console.log
-          else
-            python -m collector.daily --out output/daily 2>&1 | tee daily-console.log
-          fi
+          args=(--out output/daily)
+          if [ -n "$SELECTED_DATE" ]; then args+=(--date "$SELECTED_DATE"); fi
+          if [ -n "$SEED_MEETING" ]; then args+=(--seed-meeting "$SEED_MEETING"); fi
+          python -m collector.daily "${args[@]}" 2>&1 | tee daily-console.log
       - name: Summarize meetings, PDFs and scratchings
         if: always()
         run: |
