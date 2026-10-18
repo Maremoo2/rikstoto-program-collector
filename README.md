@@ -162,12 +162,14 @@ Collector:
 ```bash
 python -m collector.daily
 python -m collector.daily --date 2026-10-18
+# Kontroll av ett kjent møte dersom automatisk oppdagelse ikke finner det:
+python -m collector.daily --date 2026-10-18 --seed-meeting OR_NR_2026-10-18
 ```
 
 Programmet henter en avgrenset løpskalender fra Rikstotos observerte
 `/api/racedays/dates/<from>/<to>`-endepunkt og
 `/api/racedays/multiTracks`, samt forsidelinker for valgt dato.
-**Bare faktiske møte-ID-er funnet i disse kildene brukes.**
+**Automatisk brukes bare faktiske møte-ID-er funnet i disse kildene.** Ved manuell feilsøking kan en kjent møte-ID også oppgis som `seed_meeting` i GitHub Actions. Manuelle møter logges separat og regnes aldri som bevis for komplett automatisk oppdagelse.
 For hvert oppdaget møte lagres offentlig startliste-JSON, uttrekk av
 eksplisitte strykningsmarkeringer, offisiell utvidet PDF og lesbar
 PDF-tekst (når tilgjengelig), eventuelle løpsprogram-JSON og
