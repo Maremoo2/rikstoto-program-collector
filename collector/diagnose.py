@@ -298,7 +298,7 @@ def run(url, strategy, out):
                     stamp(stages, "pdf", "PASS" if pdf_ok else "WARN",
                           report.get("code", "PDF_ERROR"),
                           "One inferred official PDF candidate checked; never proof of complete date coverage",
-                          **report)
+                          **{"pdf_" + str(k): v for k, v in report.items()})
     else:
         stamp(stages, "http", "SKIP", "ROBOTS_UNVERIFIED", "Access gate not passed")
         stamp(stages, "browser", "SKIP", "ROBOTS_UNVERIFIED", "Access gate not passed")
