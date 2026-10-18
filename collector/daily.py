@@ -25,6 +25,7 @@ from zoneinfo import ZoneInfo
 from .pipeline import DOMAIN, USER_AGENT, check_robots, source_allowed
 from .pdf_program import parse_extended_pdf
 from .calendar_audit import calendar_window, calendar_racedays
+from .startlist_audit import reconcile_startlist
 
 OSLO = ZoneInfo("Europe/Oslo")
 MEETING_ID = re.compile(r"\b[A-Z0-9]{1,14}_[A-Z]{2,4}_(20\d{2}-\d{2}-\d{2})\b", re.I)
@@ -401,7 +402,23 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
                                 # a positive-only scratch-status extraction.
                                 doc["qa"]["active_count"] = None
                                 doc["qa"]["scratch_verification"] = "positive_only"
-                            # Update structured file after matching positive scratches.
+                            # A verified starts response explicitly carries isScratched
+                            # as a BOOLEAN for every horse. Cross-check exact PDF
+                            # race/start numbers AND names before marking any horse
+                            # ACTIVE or SCRATCHED as of this observation.
+                            if starts is not None and not record["is_multi_track_product"]:
+                                starts_at = next((item.get("at_utc") for item in reversed(logs)
+                                                  if item.get("url") == starts_url), None)
+                                audit = reconcile_startlist(
+                                    parsed_program["races"], starts, captured_at=starts_at)
+                                record["startlist_pdf_audit"] = audit
+                                if audit["status"] != "MATCHED_AS_OF_SNAPSHOT":
+                                    warnings.append(f"PDF_STARTLIST_HORSES_UNVERIFIED:{meeting}")
+                            else:
+                                record["startlist_pdf_audit"] = {
+                                    "status": "COMPOSITE_OR_UNAVAILABLE",
+                                    "note": "Do not validate pooled Xpress legs against physical race numbers"
+                                }
                             dump(mdir / "structured_program.json", parsed_program)
                     else:
                         record["program_pdf"] = "SOURCE_UNAVAILABLE"
@@ -451,6 +468,15 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
                                            if not r["is_multi_track_product"]),
                 "unique_track_prior_starts": sum(r.get("parsed_history_rows", 0) for r in manifest["meetings"]
                                                 if not r["is_multi_track_product"]),
+                "verified_snapshot_horses": sum(
+                    r.get("startlist_pdf_audit", {}).get("horses_verified", 0)
+                    for r in manifest["meetings"] if not r["is_multi_track_product"]),
+                "verified_snapshot_scratches": sum(
+                    r.get("startlist_pdf_audit", {}).get("confirmed_scratches", 0)
+                    for r in manifest["meetings"] if not r["is_multi_track_product"]),
+                "fully_reconciled_independent_meetings": sum(
+                    r.get("startlist_pdf_audit", {}).get("status") == "MATCHED_AS_OF_SNAPSHOT"
+                    for r in manifest["meetings"] if not r["is_multi_track_product"]),
             }
             # Even a complete-looking snapshot remains unverified until the
             # official full daily schedule has been independently reconciled.
@@ -458,6 +484,8 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
                 "CAPTURED_UNVERIFIED" if manifest["meetings"] and
                 all(r["program_pdf"] == "PDF_TEXT_OK"
                     and bool(r.get("pdf_race_numbers"))
+                    and (r["is_multi_track_product"] or
+                         r.get("startlist_pdf_audit", {}).get("status") == "MATCHED_AS_OF_SNAPSHOT")
                     and r["scratching_status"] == "EXPLICIT_FLAGS_OBSERVED"
                     and bool(r["race_numbers"])
                     and (r["is_multi_track_product"] or
