@@ -9,16 +9,18 @@ on:
         type: string
         default: "https://www.rikstoto.no/Spill/OR_NR_2026-10-18/V?race=6&p=6:0"
       strategy:
-        description: "Stage: HTTP only, browser only, or both"
+        description: "Stage: HTTP, Chromium, official PDF, or all"
         required: true
         type: choice
-        options: [http, browser, both]
-        default: both
+        options: [http, browser, pdf, both, all]
+        default: all
   push:
     branches: [main]
     paths:
       - 'collector/diagnose.py'
       - 'tests/test_diagnose.py'
+      - 'tests/test_pdf_probe.py'
+      - 'collector/pdf_probe.py'
       - '.github/workflows/rikstoto-diagnostics.yml'
 
 permissions:
@@ -30,7 +32,7 @@ jobs:
     timeout-minutes: 8
     env:
       TARGET_URL: ${{ inputs.target_url || 'https://www.rikstoto.no/Spill/OR_NR_2026-10-18/V?race=6&p=6:0' }}
-      STRATEGY: ${{ inputs.strategy || 'both' }}
+      STRATEGY: ${{ inputs.strategy || 'all' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,7 +45,7 @@ jobs:
           python -m pip install -r requirements-dev.txt
           python -m playwright install --with-deps chromium
       - name: Verify diagnostic policy (offline)
-        run: python -m pytest tests/test_diagnose.py -q
+        run: python -m pytest tests/test_diagnose.py tests/test_pdf_probe.py -q
       - name: Step-by-step public-site diagnosis
         id: probe
         continue-on-error: true
@@ -79,6 +81,8 @@ jobs:
           path: |
             diagnostics/report.json
             diagnostics/browser.png
+            diagnostics/official_candidate.pdf
+            diagnostics/official_candidate.txt
             diagnostics-console.log
           if-no-files-found: warn
           retention-days: 14
