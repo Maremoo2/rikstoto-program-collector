@@ -263,3 +263,77 @@ den gamle GitHub-kjøringen. De er **ikke bevis** på at den oppdaterte
 GitHub Actions-jobben har bestått en ny dagshenting. `completeness_verified`
 står fortsatt `false` inntil komplett dagskalender og alle løp er
 kontrollert mot uavhengige, fullstendige kilder.
+
+
+## Morgenarkiv: ny kildekontroll og GitHub Releases (18.10.2026)
+
+**Første virkelige vellykkede innsamling:** GitHub Actions run
+[`39120564330`](https://github.com/Maremoo2/rikstoto-program-collector/actions/runs/39120564330)
+hadde **65/65 beståtte tester** og arkiverte 8 offisielle program-PDF-er.
+7 selvstendige baner ga 63 løp, 663 hester og 20 bekreftede strykninger
+ved kontrolltidspunktet. V4 Xpress er et sammensatt, separat program.
+
+### Dokumentert oppdagelse av baner
+
+Den offisielle datoperiode-API-en
+`/api/racedays/dates/2026-10-18/2026-10-19` svarte med tom
+`result`, selv om det var åtte møter på Rikstotos forside.
+Nå benyttes først de **offisielle `raceDays`-dataene fra nettstedets
+offentlig tilgjengelige `window.__spaRehydration`**, som på denne datoen
+inneholdt de faktiske 8 `raceDayKey`-ene samt `isMultiTrack`.
+Når nettstedet oppgir `raceDays.url=/api/racedays`, prøver
+innsamleren dessuten dette direkte observerte endepunktet
+for krysskontroll. Den lagrer `discovery_spa_schedule.json`,
+`discovery_racedays.json` (hvis tilgjengelig) og
+`manifest.json.schedule_comparison` med kildeavvik.
+
+**Viktig:** Forsidens `raceDays[].races` viser av og til bare noen
+løp som tilbys på forsiden. Parislongchamp hadde eksempelvis bare
+løp 3 i forsidens `races`, mens offisiell full startliste viste
+løp 1–8. Derfor brukes **startliste-API-et mot PDF-programmet**
+for fullstendige løps- og hestetall. Vi setter aldri
+`completeness_verified=true` bare fordi to nettstedsendepunkter er enige.
+
+### Lagring som ikke er begrenset til Actions' 90 dager
+
+På en **planlagt morgenkjøring**, eller en **manuell kjøring med
+`persist_archive=true`**, laster et separat GitHub Actions-jobbtrinn
+ned den fullførte innsamlingen, kontrollerer manifestet og bygger
+`rikstoto-<DATE>-<UTC-RUN>.zip` pluss en egen SHA-256-fil.
+Deretter opprettes en egen GitHub **Release per kjøring** med taggen
+`rikstoto-program-<DATE>-<UTC-RUN>`. Release-assets inneholder
+kilde-PDF-er, startlister, JSON, metadata og QA. Det opprettes ingen
+Release ved automatiske `push`-smoke-tester.
+
+Arkivet ligger under
+[Releases](https://github.com/Maremoo2/rikstoto-program-collector/releases).
+En Release er **ikke** det samme som et vanlig Actions-artefakt og
+har ikke den automatiske 90-dagers levetiden; arkivet kan fortsatt
+fjernes av administrator eller fremtidige tjenesteregler.
+GitHub krever en `GITHUB_TOKEN` med `contents:write` for denne
+publiseringen. En eventuell avvist publisering vises med feilkode
+i `persist`-jobben; da er ikke varig lagring bekreftet.
+
+**Manuell første verifikasjon:** Åpne
+[Daily Rikstoto full programs – 07 Oslo](https://github.com/Maremoo2/rikstoto-program-collector/actions/workflows/rikstoto-morning.yml),
+velg `Run workflow`, sett `date=2026-10-18`, la møte-seed
+stå tomt og behold `persist_archive=true`. Sjekk deretter at
+`full-day` er grønn, `persist` er grønn og at Release finnes.
+Automatiske tester sjekker også ZIP-integritet og SHA-256-beregning.
+
+### Faktisk kontroll av 07:00
+
+Jobben er tidssoneplanlagt med
+`cron: '0 7 * * *'` og `timezone: Europe/Oslo`.
+Hver kjøring rapporterer om hendelsen var `schedule`,
+`workflow_dispatch` eller `push`, og klokkeslett i Oslo.
+**07:00 er foreløpig konfigurert, men er ikke verifisert som en
+faktisk tidsutløst kjøring før første `schedule`-event foreligger.**
+GitHub kan forsinke planlagte jobber. I offentlige repoer kan
+GitHub deaktivere planlagte workflows etter 60 dagers inaktivitet.
+
+**Kvalitetsport:** `CAPTURED_UNVERIFIED` betyr at kjente
+strukturerte dagskilder og alle oppdagede møte-programmer er behandlet
+og avstemt. Det betyr *ikke* uavhengig bevis for alle løp i hele
+markedet. Ved manglende dagskilde eller avkortet møteutvalg brukes
+`REVIEW_REQUIRED`. `completeness_verified` forblir `false`.
