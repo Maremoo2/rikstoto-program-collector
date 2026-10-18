@@ -195,3 +195,32 @@ last ned artefakten og se `manifest.json`.
 
 Dette er separat fra Betting V3 og utfører aldri innlogging,
 spillehandlinger, oddsvurderinger eller automatiske innsatser.
+
+
+### Strukturert fullt program og kontroll mot startliste
+
+Den nye PDF-parseren leser hvert faktisk `START KL.`-løp i offisielle
+utvidede programmer, og lagrer hestenummer, hestenavn, kusk,
+løpstid, distanse, startmetode og rå linjer fra tidligere starter.
+**Ingenting oppdiktes** når et felt mangler. For møtet lagres
+`meetings/<ID>/structured_program.json`, og alle innleste møter samles
+i `structured_program_day.json`.
+
+Kontroll mot ekte Orkla-program 18.10.2026 ga **11 løp, 106 hester og
+529 historiske startlinjer**; i løp 6 var det **15 hester og 75 tidligere
+starter**. Dette er en faktisk test av ett PDF-dokument, **ikke bevis på
+at alle baner eller alle andre lands dokumentformater kan parses**.
+Programmet sammenligner PDF-ens løpsnumre med startliste-API-ets
+løpsnumre når begge finnes, og gir
+`STARTLIST_PDF_RACE_MISMATCH:<ID>` ved avvik.
+
+Strykninger lagres som positive, eksplisitte funn fra offentlige
+startlister. Bare bekreftede treff merkes
+`SCRATCHED_CONFIRMED_BY_STARTLIST`. For andre hester beholdes
+`scratch_state=UNVERIFIED`; **0 funn betyr ikke nødvendigvis ingen
+strykninger**. Spesielt klokken 07:00 kan strykninger endres senere.
+
+`completeness_verified` holdes `false` til alle baner og løp er
+avstemt mot uavhengig dagsprogram og strykningene er kontrollert.
+`CAPTURED_UNVERIFIED` betyr bare at gjenkjente kilder kom inn,
+ikke at hele dagen er fullstendig.
