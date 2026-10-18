@@ -9,9 +9,13 @@ on:
     paths:
       - 'collector/daily.py'
       - 'collector/pdf_program.py'
+      - 'collector/calendar_audit.py'
+      - 'collector/startlist_audit.py'
       - 'collector/parsing.py'
       - 'tests/test_daily.py'
       - 'tests/test_pdf_program.py'
+      - 'tests/test_calendar_audit.py'
+      - 'tests/test_startlist_audit.py'
       - '.github/workflows/rikstoto-morning.yml'
   workflow_dispatch:
     inputs:
@@ -84,7 +88,14 @@ jobs:
                             f"**Positivt identifiserte strykninger:** {counts.get('scratches_positively_identified', 0)}  \n"
                             f"**Strukturerte løp fra PDF:** {counts.get('pdf_races_parsed', 0)}  \n"
                             f"**Hester fra PDF:** {counts.get('pdf_horses_parsed', 0)}  \n"
-                            f"**Tidligere starter fra PDF:** {counts.get('pdf_history_rows', 0)}  \n\n")
+                            f"**Tidligere starter fra PDF:** {counts.get('pdf_history_rows', 0)}  \n"
+                            f"**Selvstendige baner:** {counts.get('independent_tracks', 'ikke verifisert')}  \n"
+                            f"**Unike løp (uten Xpress-dobbelttelling):** {counts.get('unique_track_races', 0)}  \n"
+                            f"**Hester i unike løp:** {counts.get('unique_track_horses', 0)}  \n"
+                            f"**Tidligere starter i unike løp:** {counts.get('unique_track_prior_starts', 0)}  \n"
+                            f"**Hester avstemt mot offisiell startliste:** {counts.get('verified_snapshot_horses', 0)}  \n"
+                            f"**Strykninger ved innsamling (avstemte løp):** {counts.get('verified_snapshot_scratches', 0)}  \n"
+                            f"**Avstemte selvstendige baner:** {counts.get('fully_reconciled_independent_meetings', 0)}  \n\n")
                   out.write("| Møte-ID | Fullt program | Strykningskilde | Løp fra PDF | Strykninger |\n")
                   out.write("|---|---|---|---|---|\n")
                   for m in doc.get("meetings", []):
