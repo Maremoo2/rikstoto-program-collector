@@ -147,3 +147,51 @@ Rikstoto har offentlig indekserte PDF-er som
 søker gjennom ukjente møte-ID-er eller påstår at PDF for 18.10.2026 finnes.
 Automatiseringen bruker ikke innlogging, sesjonscookies eller spillkonto.
 
+
+
+## Automatisk morgenarkiv kl. 07:00 norsk tid
+
+Workflow: **Actions → Daily Rikstoto full programs – 07 Oslo**.
+Den er konfigurert med `cron: 0 7 * * *` og
+`timezone: Europe/Oslo` (sommer-/vintertid). GitHub-hostede planlagte
+jobber kan bli forsinket eller enkelte ganger ikke startet ved stor
+belastning. Den bruker standard **dagens dato i Oslo**, uavhengig av
+GitHub-serverens tidssone, og kan også startes manuelt med `date`.
+
+Collector:
+```bash
+python -m collector.daily
+python -m collector.daily --date 2026-10-18
+```
+
+Programmet henter en avgrenset løpskalender fra Rikstotos observerte
+`/api/racedays/dates/<from>/<to>`-endepunkt og
+`/api/racedays/multiTracks`, samt forsidelinker for valgt dato.
+**Bare faktiske møte-ID-er funnet i disse kildene brukes.**
+For hvert oppdaget møte lagres offentlig startliste-JSON, uttrekk av
+eksplisitte strykningsmarkeringer, offisiell utvidet PDF og lesbar
+PDF-tekst (når tilgjengelig), eventuelle løpsprogram-JSON og
+kuskeendringer.
+
+**Utgangsmaterialet er ikke garantert komplett**. Automatisk kalender-
+oppdagelse på tvers av norske, svenske, franske og kanadiske løpsmøter
+er ennå ikke verifisert mot en uavhengig fasit. Mangel på gjenkjente
+strykninger betyr ikke nødvendigvis null strykninger. Kl. 07 gir et
+tidlig øyeblikksbilde – strykninger kan skje senere. De fullstendige
+PDF-ene har ofte fem tidligere starter, men parserens korrekthet må
+kontrolleres mot faktisk data før en maskinlesbar historikk erklæres
+verifisert.
+
+Hver kjøring lager:
+`output/daily/YYYY-MM-DD/<UTC-timestamp>/manifest.json`
+og `meetings/<MEETING_ID>/full_program.pdf`,
+`full_program.txt`, `starts.json`, `scratchings.json`, eventuelt
+`race_XX.json` og `driver_changes.json`. Kildestatus, feil,
+SHA-256 og tidspunkter lagres i manifest/kildelogger. Resultatet vises
+i **Job summary** og lastes ned fra **Artifacts → rikstoto-morning-programs**.
+GitHub-artefakten beholdes **90 dager**, ikke permanent. Jobben kan
+være rød ved ufullstendig innsamling selv når noen filer er lagret;
+last ned artefakten og se `manifest.json`.
+
+Dette er separat fra Betting V3 og utfører aldri innlogging,
+spillehandlinger, oddsvurderinger eller automatiske innsatser.
