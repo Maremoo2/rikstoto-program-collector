@@ -224,9 +224,16 @@ def extract_pdf(binary: bytes, folder: Path):
         return {"readable": False, "error": f"{type(exc).__name__}: {str(exc)[:250]}"}
 
 
-async def archive_day(day, out, *, max_meetings=18, max_races=18):
+async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=()):
     from playwright.async_api import async_playwright
     day = Date.fromisoformat(day).isoformat()
+    seeds = []
+    for seed in seed_meetings:
+        seed = seed.strip().upper()
+        match = MEETING_ID.fullmatch(seed)
+        if not match or match.group(1) != day:
+            raise ValueError(f'Seed meeting must contain exactly requested date {day}: {seed}')
+        seeds.append(seed)
     run = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
     folder = Path(out) / day / run
     folder.mkdir(parents=True, exist_ok=False)
@@ -284,6 +291,13 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18):
                     manifest["discoveries"].append({"source": label, "url": url,
                                                     "meeting_ids": ids, "received": data is not None})
                     meeting_set.update(ids)
+                auto_discovered = sorted(meeting_set)
+                for seed in seeds:
+                    meeting_set.add(seed)
+                manifest["automatically_discovered_meetings"] = auto_discovered
+                manifest["manually_seeded_meetings"] = sorted(set(seeds))
+                if seeds:
+                    warnings.append("MANUAL_SEEDS_DO_NOT_VERIFY_COMPLETE_DATE_COVERAGE")
                 if not meeting_set:
                     warnings.append("NO_MEETING_IDS_DISCOVERED_FROM_OFFICIAL_SOURCES")
                 if len(meeting_set) > max_meetings:
@@ -447,6 +461,8 @@ def main():
     parser = argparse.ArgumentParser(description="Archive today's official Rikstoto programs at 07:00 Oslo time")
     parser.add_argument("--date", default=None, help="YYYY-MM-DD; default today in Europe/Oslo")
     parser.add_argument("--out", default="output/daily")
+    parser.add_argument("--seed-meeting", action="append", default=[],
+                        help="Optional independently known meeting ID for this date, not part of auto discovery")
     parser.add_argument("--max-meetings", type=int, default=18)
     parser.add_argument("--max-races", type=int, default=18)
     args = parser.parse_args()
@@ -455,7 +471,8 @@ def main():
     day = args.date or oslo_date()
     folder, result = asyncio.run(archive_day(day, args.out,
                                               max_meetings=args.max_meetings,
-                                              max_races=args.max_races))
+                                              max_races=args.max_races,
+                                              seed_meetings=args.seed_meeting))
     print(f"Manifest: {folder / 'manifest.json'}")
     return 0 if result["status"] == "CAPTURED_UNVERIFIED" else 1
 
