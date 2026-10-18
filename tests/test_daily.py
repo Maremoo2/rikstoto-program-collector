@@ -59,3 +59,25 @@ def test_norwegian_date_timezone_from_utc():
     oslo = ZoneInfo("Europe/Oslo")
     assert winter.astimezone(oslo).date().isoformat() == "2026-01-18"
     assert summer.astimezone(oslo).date().isoformat() == "2026-07-18"
+
+
+def test_meeting_or_race_status_is_not_horse_scratch_evidence():
+    from collector.daily import scratch_signals
+    sample = {"status": "SCHEDULED", "races": [
+        {"raceNumber": 6, "status": "OPEN",
+         "starts": [{"horseNumber": 2, "horseName": "Lesja Loke"},
+                    {"horseNumber": 3, "horseName": "Test Horse"}]}]}
+    observed = scratch_signals(sample)
+    assert observed["explicit_status_fields_seen"] == 0
+    assert observed["positive_scratches"] == []
+
+
+def test_explicit_horse_status_is_recorded():
+    from collector.daily import scratch_signals
+    source = {"races": [{"raceNumber": 6, "starts": [
+        {"horseNumber": 2, "horseName": "Lesja Loke", "status": "SCRATCHED"},
+        {"horseNumber": 3, "horseName": "Other", "status": "RUNNING"}]}]}
+    result = scratch_signals(source)
+    assert result["explicit_status_fields_seen"] == 2
+    assert len(result["positive_scratches"]) == 1
+    assert result["positive_scratches"][0]["horse_number"] == 2
