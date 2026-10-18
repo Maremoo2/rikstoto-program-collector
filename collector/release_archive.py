@@ -76,7 +76,7 @@ def build_release_archive(root: Path, dest: Path) -> dict:
         encoding="utf-8",
     )
     return {
-        "tag": f"rikstoto-program-{day}",
+        "tag": f"rikstoto-program-{day}-{run_id}",
         "archive": str(archive),
         "checksum": str(checksum),
         "notes": str(notes),
