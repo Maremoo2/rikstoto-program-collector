@@ -13,7 +13,10 @@ from pathlib import Path
 
 MAX_BODY = 95_000
 HISTORY_LIMIT = 500
-SCHEMA = "prewatch_source_v1"\n\n# Source readiness is not a V3 sports score, A-WATCH or BET decision.\nSOURCE_READY_STATUSES = {"MATCHED_AS_OF_SNAPSHOT"}
+SCHEMA = "prewatch_source_v1"
+
+# Source readiness is not a V3 sports score, A-WATCH or BET decision.
+SOURCE_READY_STATUSES = {"MATCHED_AS_OF_SNAPSHOT"}
 
 
 def compact(value, limit=160):
@@ -51,7 +54,10 @@ def race_card(doc):
                 f"  - {past.get('date') or '?'} previous_race={past.get('race_number') or '?'}"
                 f" | original={compact(past.get('raw_text'), HISTORY_LIMIT)}"
             )
-    return "\n".join(lines) + "\n\n"
+    return "
+".join(lines) + "
+
+"
 
 
 def build_handoff(root: Path, dest: Path):
@@ -88,21 +94,32 @@ def build_handoff(root: Path, dest: Path):
     }
     for meeting in meetings:
         mid = meeting["meeting_id"]
-        docs = sorted(races.get(mid, []), key=lambda doc: doc["race"]["race_number"])\n        audit_status = meeting.get("startlist_pdf_audit", {}).get("status", "UNKNOWN")\n        source_ready = audit_status in SOURCE_READY_STATUSES
+        docs = sorted(races.get(mid, []), key=lambda doc: doc["race"]["race_number"])
+        audit_status = meeting.get("startlist_pdf_audit", {}).get("status", "UNKNOWN")
+        source_ready = audit_status in SOURCE_READY_STATUSES
         if not docs:
             index["no_race_meetings"].append(mid)
             continue
         header = (
-            "# PRE-WATCH DATA FEED (not a betting recommendation)\n\n"
-            f"Schema={SCHEMA} | Date={day} Europe/Oslo | Run={run_id}\n"
+            "# PRE-WATCH DATA FEED (not a betting recommendation)
+
+"
+            f"Schema={SCHEMA} | Date={day} Europe/Oslo | Run={run_id}
+"
             f"Meeting={mid} | Track={compact(meeting.get('listing_source', {}).get('track'))}"
-            f" | Country={meeting.get('listing_source', {}).get('country')}\n"
+            f" | Country={meeting.get('listing_source', {}).get('country')}
+"
             f"Source ZIP tag={index['source_archive_tag']}"
-            f" | PDF/Startlist audit={meeting.get('startlist_pdf_audit', {}).get('status', 'UNKNOWN')}\n"
-            f"Collection status={m.get('status')} | Snapshot UTC={m.get('created_utc')}\n"
+            f" | PDF/Startlist audit={meeting.get('startlist_pdf_audit', {}).get('status', 'UNKNOWN')}
+"
+            f"Collection status={m.get('status')} | Snapshot UTC={m.get('created_utc')}
+"
             "This is historical/static source evidence for shortlisting, NOT a fresh WIN market."
-            " Recheck current scratches, equipment, start times and prices before action.\n"
-            "Raw previous-start lines are limited excerpts and are NOT complete trip interpretation.\n\n"
+            " Recheck current scratches, equipment, start times and prices before action.
+"
+            "Raw previous-start lines are limited excerpts and are NOT complete trip interpretation.
+
+"
         )
         chunks, current = [], header
         for doc in docs:
@@ -132,7 +149,9 @@ def build_handoff(root: Path, dest: Path):
                 "race_numbers": race_numbers_in_part,
                 "body_length": len(text),
                 "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
-                "meeting_source_status": audit_status,\n                "source_ready_snapshot": source_ready,\n                "source_blocker": None if source_ready else "PDF_STARTLIST_NOT_FULLY_RECONCILED",
+                "meeting_source_status": audit_status,
+                "source_ready_snapshot": source_ready,
+                "source_blocker": None if source_ready else "PDF_STARTLIST_NOT_FULLY_RECONCILED",
             })
     index["meeting_count"] = len(meetings)
     index["race_count"] = sum(len(races.get(x["meeting_id"], [])) for x in meetings)
@@ -152,14 +171,18 @@ def build_handoff(root: Path, dest: Path):
     ]
     for item in index["meeting_feeds"]:
         lines.append(f"- {item['release_tag']} | race_numbers={item['race_numbers']}"
-                     f" | sha256={item['sha256'][:16]}"\n                     f" | source_ready_snapshot={item['source_ready_snapshot']}"\n                     f" | source_blocker={item['source_blocker'] or 'NONE'}")
+                     f" | sha256={item['sha256'][:16]}"
+                     f" | source_ready_snapshot={item['source_ready_snapshot']}"
+                     f" | source_blocker={item['source_blocker'] or 'NONE'}")
     lines += [
         "",
         "MORNING SNAPSHOT ONLY: check fresh official scratched/gear changes and race-start clock.",
         "NO WIN ODDS HERE. Do not infer current betting prices, EV, p(win), or WATCH/BET.",
         "The model, thresholds, V3.3.12 write-audit, and all betting rules remain unchanged.",
     ]
-    (dest / "index.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (dest / "index.md").write_text("
+".join(lines) + "
+", encoding="utf-8")
     return index
 
 
