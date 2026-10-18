@@ -226,3 +226,40 @@ strykninger**. Spesielt klokken 07:00 kan strykninger endres senere.
 avstemt mot uavhengig dagsprogram og strykningene er kontrollert.
 `CAPTURED_UNVERIFIED` betyr bare at gjenkjente kilder kom inn,
 ikke at hele dagen er fullstendig.
+
+
+### Kontrollkjøring 18.10.2026 – funn og rettelser (etter run 39119416534)
+
+Denne kjøringen hadde **53/53 beståtte tester**, fant 8 program-PDF-er
+og hentet offentlige startlister, men ble korrekt merket
+`REVIEW_REQUIRED` fordi den gamle PDF-parseren overså svenske/finske
+sammenkjedede `START KL.`-markører. Den opprinnelige parseren fant
+bare 34 av programmets 67 løpsseksjoner.
+
+En separat OFFLINE-krysskontroll av de faktisk nedlastede PDF-ene og
+JSON-startlistene (ingen simulerte løpsdata) etter parserrettelsen fant:
+
+- **7 selvstendige løpsmøter**, **63 løp**, **663 hester** og
+  **2 689 historiske startlinjer**.
+- **63/63 løp og 663/663 hester** hadde nøyaktig tilsvarende løpsnummer,
+  startnummer og hestenavn i Rikstotos offentlige startlistekilder.
+- **20 eksplisitte `isScratched=true`** blant de 663 hestene.
+  `isScratched=false` for hver av de øvrige er nå mulig å verifisere
+  **på tidspunktet** API-responsen ble lagret. Senere strykninger kan
+  komme, og kl. 07:00 er ikke en sluttliste.
+- Det åttende PDF-programmet, **X1 (Orkla/Årjäng V4 Xpress)**, er et
+  sammensatt produkt med 4 allerede inngående løp; det skal arkiveres,
+  men ikke legges til som en åttende selvstendig bane.
+
+Den opprinnelige kalenderforespørselen brukte
+`/api/racedays/dates/2026-10-11/2026-10-18`. Faktisk svar inneholdt
+11.–17. oktober, **ikke 18. oktober**. Ny kode bruker derfor
+`/api/racedays/dates/2026-10-18/2026-10-19`
+og leser kalenderens egne `raceDayKey`, `raceNumber` og
+`isMultiTrack`-felt for uavhengig kontroll.
+
+**Viktig:** Tallene over er lokal offline-reanalyse av kildene fra
+den gamle GitHub-kjøringen. De er **ikke bevis** på at den oppdaterte
+GitHub Actions-jobben har bestått en ny dagshenting. `completeness_verified`
+står fortsatt `false` inntil komplett dagskalender og alle løp er
+kontrollert mot uavhengige, fullstendige kilder.
