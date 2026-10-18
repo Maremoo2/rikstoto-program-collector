@@ -69,3 +69,73 @@ def test_wrong_date_is_rejected():
         date="2026-10-19", url="https://www.rikstoto.no/", captured_at="2026-10-18T09:00:00Z")
     assert output["races"] == []
     assert "PDF_DATE_MISMATCH" in output["qa"]["warnings"]
+
+
+def test_swedish_appended_start_markers_do_not_lose_races():
+    text = """1
+Løp 1
+2140m Voltestart Swedish program description Hederspris.START KL. 14:00
+1 NORD SMARAGD, Christian Månsson cc / Va
+3-års hp e Tekno Odin
+Tr: Trainer Ei: Owner
+2026: 1-0-0-0 Tot: 1-0-0-0
+Lun Hu Ly 30.06.26-1|6 6 d 2140 ug
+Skellefteå 18.10.2026 Utvidet - rikstoto.no Side: 1 av 2
+2
+Løp 2
+1640m Autostart Trophy winner will receive.START KL. 14:22
+1 TEST WINNER, Another Driver
+4-års v e Some Horse
+Tr: Trainer Ei: Owner
+2026: 1-1-0-0 Tot: 1-1-0-0
+Test Dr Ly 07.10.26-2|4 1 1 1640 12,0
+Skellefteå 18.10.2026 Utvidet - rikstoto.no Side: 2 av 2
+"""
+    result = parsed(text)
+    assert result["qa"]["race_sections"] == 2
+    assert result["qa"]["race_numbers"] == [1, 2]
+    assert result["qa"]["horses"] == 2
+    assert result["qa"]["history_rows"] == 2
+
+
+def test_gallop_prior_starts_do_not_require_pipe():
+    text = """1
+Prix De La Chapelle
+1800m For fillies aged 2. AVERAGE TRACK.START KL. 15:15
+1 SHOLPANA (FR), C.Demuro 58 Ft
+2-års brun hp e Some Sire
+Tr: M.Baratti Ei: Owner
+2026: 4-0-0-1 Tot: 4-0-0-1
+Ca Lop Du 02.01.26-7 3 1400 dt Rask 13-m
+Ca Lop Jä 07.06.26-7 7 1730 dt God
+Parislongchamp 18.10.2026 Utvidet - rikstoto.no Side: 1 av 1
+"""
+    result = parsed(text)
+    assert result["qa"]["race_numbers"] == [1]
+    assert result["qa"]["horses"] == 1
+    assert result["qa"]["history_rows"] == 2
+    assert result["races"][0]["entrants"][0]["past_starts"][0]["race_number"] == 7
+
+
+def test_composite_program_preserves_actual_race_numbers_not_order():
+    text = """V4-1
+Jakt.se Løp 10
+1640m Autostart Prize. START KL. 17:08
+1 FRODO DE CASTELLA, Julian Cordeau
+7-års brun v
+Tr: Owner
+2026: 1-1-0-0 Tot: 1-1-0-0
+Cor Ju Ax 12.10.26-3|1 1 1 1640
+V4-2
+Løp 1
+2300m Voltestart. START KL. 17:53
+1 LANGLANDS SINDY, Per Arne Eggan
+8-års brun hp
+Tr: Owner
+2026: 1-1-0-0 Tot: 1-1-0-0
+Pe Egg OA 28.09.26-1|3 6 5 2300
+V4 Xpress 18.10.2026 Utvidet - rikstoto.no Side: 1 av 1
+"""
+    result = parsed(text)
+    assert result["qa"]["race_numbers"] == [1, 10]
+    assert [race["race"]["race_number"] for race in result["races"]] == [10, 1]
