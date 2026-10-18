@@ -1,0 +1,1 @@
+"""Rikstoto program collector package."""
