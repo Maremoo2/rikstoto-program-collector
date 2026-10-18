@@ -81,6 +81,8 @@ jobs:
           path: |
             diagnostics/report.json
             diagnostics/browser.png
+            diagnostics/api_program.json
+            diagnostics/api_starts.json
             diagnostics/official_candidate.pdf
             diagnostics/official_candidate.txt
             diagnostics-console.log
