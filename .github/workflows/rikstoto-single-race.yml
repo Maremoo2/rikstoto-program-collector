@@ -1,0 +1,101 @@
+name: Rikstoto single-race smoke test
+
+on:
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Race day, YYYY-MM-DD"
+        type: string
+        required: true
+        default: '2026-10-18'
+      race_url:
+        description: "Known public race URL (test exactly this race)"
+        type: string
+        required: true
+        default: 'https://www.rikstoto.no/Spill/OR_NR_2026-10-18/V?race=6&p=6:0'
+
+permissions:
+  contents: read
+
+jobs:
+  one-race:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      RACE_DATE: ${{ inputs.date }}
+      RACE_URL: ${{ inputs.race_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies and Chromium
+        run: |
+          python -m pip install -r requirements-dev.txt
+          python -m playwright install --with-deps chromium
+      - name: Validate one known meeting, then collect only race
+        id: run
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          python - <<'PY'
+          import os
+          from collector.diagnose import safe_url
+          from collector.parsing import link_identity
+          u=safe_url(os.environ['RACE_URL'])
+          d=os.environ['RACE_DATE']
+          assert d in u and len(d)==10, "Race URL must be for provided date"
+          assert link_identity(u)['race_number'], "A concrete race number is required"
+          PY
+          python -m collector collect --date "$RACE_DATE" \
+            --source-url "$RACE_URL" --seed-url "$RACE_URL" \
+            --scan-races 0 --expected-races 1 --out output \
+            2>&1 | tee collection-console.log
+      - name: Publish collection QA
+        if: always()
+        id: qa
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          import json, os, sys
+          from pathlib import Path
+          outputs=sorted(Path("output").glob("*/program.json"))
+          summary=Path(os.environ["GITHUB_STEP_SUMMARY"])
+          if not outputs:
+              summary.write_text("# Single-race smoke test\n\nNo program.json generated. Inspect collection-console.log.\n",
+                                 encoding="utf-8")
+              sys.exit(1)
+          obj=json.loads(outputs[-1].read_text(encoding="utf-8"))
+          qa=obj.get("qa", {})
+          caps=obj.get("captures", [])
+          txt=("# Single-race smoke test\n\n"
+               f"- **QA:** {qa.get('status')}\n"
+               f"- **Races parsed:** {qa.get('races_parsed', 0)}\n"
+               f"- **Horses:** {qa.get('horses', 0)}\n"
+               f"- **Historical start rows:** {qa.get('past_start_rows', 0)}\n"
+               f"- **Robots gate:** {obj.get('robots')}\n"
+               f"- **Warnings:** {qa.get('warnings')}\n\n"
+               "## Page captures\n\n"
+               "| URL | Status | Error |\n|---|---|---|\n")
+          for cap in caps:
+              txt += f"| {cap.get('url','')} | {cap.get('status','')} | {str(cap.get('error', ''))[:120]} |\n"
+          txt += "\n**Important:** A parsed race is not a verified complete or accurate race program.\n"
+          with summary.open("a", encoding="utf-8") as f: f.write(txt)
+          if qa.get("races_parsed", 0) != 1 or qa.get("horses", 0) < 1:
+              sys.exit(1)
+          PY
+      - name: Preserve actual captures and structured exports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rikstoto-single-race
+          path: |
+            output/
+            collection-console.log
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Report incomplete smoke test
+        if: steps.run.outcome == 'failure' || steps.qa.outcome == 'failure'
+        run: |
+          echo "Single race was not parsed; inspect artifacts and QA summary."
+          exit 1
