@@ -510,8 +510,15 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
             }
             # Even a complete-looking snapshot remains unverified until the
             # official full daily schedule has been independently reconciled.
+            # Captured-unverified requires all source-discovered meetings to
+            # have been visited, and at least one structured dated schedule
+            # source. A manual seed or an arbitrary homepage link list is not
+            # an independently sufficient discovery baseline.
+            coverage = (len(manifest["meetings"]) == len(meeting_set)
+                        and bool(embedded_home["meetings"] or direct_racedays or calendar_entries)
+                        and not manifest["schedule_comparison"]["missing_from_collector"])
             manifest["status"] = (
-                "CAPTURED_UNVERIFIED" if manifest["meetings"] and
+                "CAPTURED_UNVERIFIED" if manifest["meetings"] and coverage and
                 all(r["program_pdf"] == "PDF_TEXT_OK"
                     and bool(r.get("pdf_race_numbers"))
                     and (r["is_multi_track_product"] or
