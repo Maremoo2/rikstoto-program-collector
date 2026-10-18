@@ -13,7 +13,7 @@ from pathlib import Path
 
 MAX_BODY = 95_000
 HISTORY_LIMIT = 500
-SCHEMA = "prewatch_source_v1"
+SCHEMA = "prewatch_source_v1"\n\n# Source readiness is not a V3 sports score, A-WATCH or BET decision.\nSOURCE_READY_STATUSES = {"MATCHED_AS_OF_SNAPSHOT"}
 
 
 def compact(value, limit=160):
@@ -88,7 +88,7 @@ def build_handoff(root: Path, dest: Path):
     }
     for meeting in meetings:
         mid = meeting["meeting_id"]
-        docs = sorted(races.get(mid, []), key=lambda doc: doc["race"]["race_number"])
+        docs = sorted(races.get(mid, []), key=lambda doc: doc["race"]["race_number"])\n        audit_status = meeting.get("startlist_pdf_audit", {}).get("status", "UNKNOWN")\n        source_ready = audit_status in SOURCE_READY_STATUSES
         if not docs:
             index["no_race_meetings"].append(mid)
             continue
@@ -132,7 +132,7 @@ def build_handoff(root: Path, dest: Path):
                 "race_numbers": race_numbers_in_part,
                 "body_length": len(text),
                 "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
-                "meeting_source_status": meeting.get("startlist_pdf_audit", {}).get("status"),
+                "meeting_source_status": audit_status,\n                "source_ready_snapshot": source_ready,\n                "source_blocker": None if source_ready else "PDF_STARTLIST_NOT_FULLY_RECONCILED",
             })
     index["meeting_count"] = len(meetings)
     index["race_count"] = sum(len(races.get(x["meeting_id"], [])) for x in meetings)
@@ -152,7 +152,7 @@ def build_handoff(root: Path, dest: Path):
     ]
     for item in index["meeting_feeds"]:
         lines.append(f"- {item['release_tag']} | race_numbers={item['race_numbers']}"
-                     f" | sha256={item['sha256'][:16]}")
+                     f" | sha256={item['sha256'][:16]}"\n                     f" | source_ready_snapshot={item['source_ready_snapshot']}"\n                     f" | source_blocker={item['source_blocker'] or 'NONE'}")
     lines += [
         "",
         "MORNING SNAPSHOT ONLY: check fresh official scratched/gear changes and race-start clock.",
