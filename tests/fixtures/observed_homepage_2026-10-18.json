@@ -1,0 +1,320 @@
+{
+  "source": "Public SPA raceDays on rikstoto.no 2026-10-18; abbreviated source fields (real observed values)",
+  "raceDays": {
+    "url": "/api/racedays",
+    "data": [
+      {
+        "raceDayKey": "F1_NR_2026-10-18",
+        "raceDayName": "Parislongchamp",
+        "countryIsoCode": "FR",
+        "sportType": "G",
+        "isMultiTrack": false,
+        "races": [
+          {
+            "raceNumber": 3,
+            "raceKey": "F1_NR_2026-10-18#3"
+          }
+        ]
+      },
+      {
+        "raceDayKey": "OR_NR_2026-10-18",
+        "raceDayName": "Varig Orkla",
+        "countryIsoCode": "NO",
+        "sportType": "T",
+        "isMultiTrack": false,
+        "races": [
+          {
+            "raceNumber": 1,
+            "raceKey": "OR_NR_2026-10-18#1"
+          },
+          {
+            "raceNumber": 2,
+            "raceKey": "OR_NR_2026-10-18#2"
+          },
+          {
+            "raceNumber": 3,
+            "raceKey": "OR_NR_2026-10-18#3"
+          },
+          {
+            "raceNumber": 4,
+            "raceKey": "OR_NR_2026-10-18#4"
+          },
+          {
+            "raceNumber": 5,
+            "raceKey": "OR_NR_2026-10-18#5"
+          },
+          {
+            "raceNumber": 6,
+            "raceKey": "OR_NR_2026-10-18#6"
+          },
+          {
+            "raceNumber": 7,
+            "raceKey": "OR_NR_2026-10-18#7"
+          },
+          {
+            "raceNumber": 8,
+            "raceKey": "OR_NR_2026-10-18#8"
+          },
+          {
+            "raceNumber": 9,
+            "raceKey": "OR_NR_2026-10-18#9"
+          },
+          {
+            "raceNumber": 10,
+            "raceKey": "OR_NR_2026-10-18#10"
+          },
+          {
+            "raceNumber": 11,
+            "raceKey": "OR_NR_2026-10-18#11"
+          }
+        ]
+      },
+      {
+        "raceDayKey": "S1_NR_2026-10-18",
+        "raceDayName": "Skellefteå",
+        "countryIsoCode": "SE",
+        "sportType": "T",
+        "isMultiTrack": false,
+        "races": [
+          {
+            "raceNumber": 1,
+            "raceKey": "S1_NR_2026-10-18#1"
+          },
+          {
+            "raceNumber": 2,
+            "raceKey": "S1_NR_2026-10-18#2"
+          },
+          {
+            "raceNumber": 3,
+            "raceKey": "S1_NR_2026-10-18#3"
+          },
+          {
+            "raceNumber": 4,
+            "raceKey": "S1_NR_2026-10-18#4"
+          },
+          {
+            "raceNumber": 5,
+            "raceKey": "S1_NR_2026-10-18#5"
+          },
+          {
+            "raceNumber": 6,
+            "raceKey": "S1_NR_2026-10-18#6"
+          },
+          {
+            "raceNumber": 7,
+            "raceKey": "S1_NR_2026-10-18#7"
+          },
+          {
+            "raceNumber": 8,
+            "raceKey": "S1_NR_2026-10-18#8"
+          },
+          {
+            "raceNumber": 9,
+            "raceKey": "S1_NR_2026-10-18#9"
+          }
+        ]
+      },
+      {
+        "raceDayKey": "S2_NR_2026-10-18",
+        "raceDayName": "Bro Park",
+        "countryIsoCode": "SE",
+        "sportType": "G",
+        "isMultiTrack": false,
+        "races": [
+          {
+            "raceNumber": 1,
+            "raceKey": "S2_NR_2026-10-18#1"
+          },
+          {
+            "raceNumber": 2,
+            "raceKey": "S2_NR_2026-10-18#2"
+          },
+          {
+            "raceNumber": 3,
+            "raceKey": "S2_NR_2026-10-18#3"
+          },
+          {
+            "raceNumber": 4,
+            "raceKey": "S2_NR_2026-10-18#4"
+          },
+          {
+            "raceNumber": 5,
+            "raceKey": "S2_NR_2026-10-18#5"
+          },
+          {
+            "raceNumber": 6,
+            "raceKey": "S2_NR_2026-10-18#6"
+          },
+          {
+            "raceNumber": 7,
+            "raceKey": "S2_NR_2026-10-18#7"
+          },
+          {
+            "raceNumber": 8,
+            "raceKey": "S2_NR_2026-10-18#8"
+          }
+        ]
+      },
+      {
+        "raceDayKey": "S3_NR_2026-10-18",
+        "raceDayName": "Solvalla",
+        "countryIsoCode": "SE",
+        "sportType": "T",
+        "isMultiTrack": false,
+        "races": [
+          {
+            "raceNumber": 2,
+            "raceKey": "S3_NR_2026-10-18#2"
+          },
+          {
+            "raceNumber": 3,
+            "raceKey": "S3_NR_2026-10-18#3"
+          },
+          {
+            "raceNumber": 4,
+            "raceKey": "S3_NR_2026-10-18#4"
+          },
+          {
+            "raceNumber": 5,
+            "raceKey": "S3_NR_2026-10-18#5"
+          },
+          {
+            "raceNumber": 6,
+            "raceKey": "S3_NR_2026-10-18#6"
+          },
+          {
+            "raceNumber": 7,
+            "raceKey": "S3_NR_2026-10-18#7"
+          },
+          {
+            "raceNumber": 8,
+            "raceKey": "S3_NR_2026-10-18#8"
+          },
+          {
+            "raceNumber": 9,
+            "raceKey": "S3_NR_2026-10-18#9"
+          },
+          {
+            "raceNumber": 10,
+            "raceKey": "S3_NR_2026-10-18#10"
+          }
+        ]
+      },
+      {
+        "raceDayKey": "S4_NR_2026-10-18",
+        "raceDayName": "Årjäng",
+        "countryIsoCode": "SE",
+        "sportType": "T",
+        "isMultiTrack": false,
+        "races": [
+          {
+            "raceNumber": 1,
+            "raceKey": "S4_NR_2026-10-18#1"
+          },
+          {
+            "raceNumber": 2,
+            "raceKey": "S4_NR_2026-10-18#2"
+          },
+          {
+            "raceNumber": 3,
+            "raceKey": "S4_NR_2026-10-18#3"
+          },
+          {
+            "raceNumber": 4,
+            "raceKey": "S4_NR_2026-10-18#4"
+          },
+          {
+            "raceNumber": 5,
+            "raceKey": "S4_NR_2026-10-18#5"
+          },
+          {
+            "raceNumber": 6,
+            "raceKey": "S4_NR_2026-10-18#6"
+          },
+          {
+            "raceNumber": 7,
+            "raceKey": "S4_NR_2026-10-18#7"
+          },
+          {
+            "raceNumber": 8,
+            "raceKey": "S4_NR_2026-10-18#8"
+          },
+          {
+            "raceNumber": 9,
+            "raceKey": "S4_NR_2026-10-18#9"
+          },
+          {
+            "raceNumber": 10,
+            "raceKey": "S4_NR_2026-10-18#10"
+          }
+        ]
+      },
+      {
+        "raceDayKey": "S5_NR_2026-10-18",
+        "raceDayName": "Woodbine",
+        "countryIsoCode": "CA",
+        "sportType": "G",
+        "isMultiTrack": false,
+        "races": [
+          {
+            "raceNumber": 1,
+            "raceKey": "S5_NR_2026-10-18#1"
+          },
+          {
+            "raceNumber": 2,
+            "raceKey": "S5_NR_2026-10-18#2"
+          },
+          {
+            "raceNumber": 3,
+            "raceKey": "S5_NR_2026-10-18#3"
+          },
+          {
+            "raceNumber": 4,
+            "raceKey": "S5_NR_2026-10-18#4"
+          },
+          {
+            "raceNumber": 5,
+            "raceKey": "S5_NR_2026-10-18#5"
+          },
+          {
+            "raceNumber": 6,
+            "raceKey": "S5_NR_2026-10-18#6"
+          },
+          {
+            "raceNumber": 7,
+            "raceKey": "S5_NR_2026-10-18#7"
+          },
+          {
+            "raceNumber": 8,
+            "raceKey": "S5_NR_2026-10-18#8"
+          }
+        ]
+      },
+      {
+        "raceDayKey": "X1_NR_2026-10-18",
+        "raceDayName": "Orkla/Årjäng",
+        "countryIsoCode": "",
+        "sportType": "T",
+        "isMultiTrack": true,
+        "races": [
+          {
+            "raceNumber": 1,
+            "raceKey": "X1_NR_2026-10-18#1"
+          },
+          {
+            "raceNumber": 2,
+            "raceKey": "X1_NR_2026-10-18#2"
+          },
+          {
+            "raceNumber": 3,
+            "raceKey": "X1_NR_2026-10-18#3"
+          },
+          {
+            "raceNumber": 4,
+            "raceKey": "X1_NR_2026-10-18#4"
+          }
+        ]
+      }
+    ]
+  }
+}
