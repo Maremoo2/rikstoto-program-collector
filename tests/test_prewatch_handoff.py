@@ -103,3 +103,33 @@ def test_error_status_does_not_publish_false_source(tmp_path):
     f.write_text(json.dumps(obj))
     with pytest.raises(ValueError, match="Collector failed"):
         build_handoff(root, tmp_path / "out")
+
+
+def test_preserves_longer_trip_comment_without_claiming_full_source(tmp_path):
+    root = write_fixture(tmp_path)
+    f = next(root.glob("*/*/structured_program_day.json"))
+    data = json.loads(f.read_text(encoding="utf-8"))
+    comment = "L" * 140 + " outside leader with no cover and still finishing strongly"
+    data["races"][0]["entrants"][0]["past_starts"][0]["raw_text"] = comment
+    f.write_text(json.dumps(data), encoding="utf-8")
+    dest = tmp_path / "handoff"
+    result = build_handoff(root, dest)
+    body = (dest / result["meeting_feeds"][0]["markdown_name"]).read_text(encoding="utf-8")
+    assert "outside leader with no cover" in body
+    assert "Raw previous-start lines are limited excerpts" in body
+
+
+def test_snapshot_readiness_flags_partial_meeting_without_claiming_bet(tmp_path):
+    root = write_fixture(tmp_path)
+    manifest = next(root.glob("*/*/manifest.json"))
+    data = json.loads(manifest.read_text(encoding="utf-8"))
+    data["meetings"][0]["startlist_pdf_audit"]["status"] = "PARTIAL_OR_UNVERIFIED"
+    manifest.write_text(json.dumps(data), encoding="utf-8")
+    dest = tmp_path / "handoff"
+    index = build_handoff(root, dest)
+    part = index["meeting_feeds"][0]
+    assert part["source_ready_snapshot"] is False
+    assert part["source_blocker"] == "PDF_STARTLIST_NOT_FULLY_RECONCILED"
+    body = (dest / part["markdown_name"]).read_text(encoding="utf-8")
+    assert "Source ready snapshot=False" in body
+    assert "NO WIN" not in body or "NOT a fresh WIN market" in body
