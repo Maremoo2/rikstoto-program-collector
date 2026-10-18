@@ -24,6 +24,7 @@ from zoneinfo import ZoneInfo
 
 from .pipeline import DOMAIN, USER_AGENT, check_robots, source_allowed
 from .pdf_program import parse_extended_pdf
+from .calendar_audit import calendar_window, calendar_racedays
 
 OSLO = ZoneInfo("Europe/Oslo")
 MEETING_ID = re.compile(r"\b[A-Z0-9]{1,14}_[A-Z]{2,4}_(20\d{2}-\d{2}-\d{2})\b", re.I)
@@ -257,12 +258,16 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
                 warnings.append(f"ROBOTS_ACCESS_UNVERIFIED:{robots.status}")
             else:
                 # The calendar endpoint is directly observed in a live site trace.
-                start = (Date.fromisoformat(day) - timedelta(days=7)).isoformat()
+                # Observed date API uses an exclusive upper bound.
+                # For 18 October, [18 Oct, 19 Oct) retrieves the target day,
+                # while the previous [11 Oct, 18 Oct) accidentally omitted it.
+                calendar_start, calendar_end = calendar_window(day)
                 sources = [
-                    (f"https://{DOMAIN}/api/racedays/dates/{start}/{day}", "calendar"),
+                    (f"https://{DOMAIN}/api/racedays/dates/{calendar_start}/{calendar_end}", "calendar"),
                     (f"https://{DOMAIN}/api/racedays/multiTracks", "multitracks"),
                 ]
                 meeting_set = set()
+                calendar_entries = {}
                 # Initialize a real browser session first so its public
                 # cookies and compatible headers are present for API requests.
                 # Browser fallback discovers meeting IDs actually embedded in
@@ -288,9 +293,15 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
                 for url, label in sources:
                     data = await request(ctx, robots, url, folder / f"discovery_{label}.json", logs)
                     ids = meeting_ids(data, day) if data is not None else []
+                    if label == "calendar" and data is not None:
+                        calendar_entries = calendar_racedays(data, day)
                     manifest["discoveries"].append({"source": label, "url": url,
-                                                    "meeting_ids": ids, "received": data is not None})
+                                                    "meeting_ids": ids, "received": data is not None,
+                                                    "calendar_typed_entries": len(calendar_entries) if label == "calendar" else None})
                     meeting_set.update(ids)
+                manifest["calendar_racedays"] = calendar_entries
+                if not calendar_entries:
+                    warnings.append("OFFICIAL_DAY_CALENDAR_MISSING_OR_UNRECOGNIZED")
                 auto_discovered = sorted(meeting_set)
                 for seed in seeds:
                     meeting_set.add(seed)
@@ -303,9 +314,12 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
                 if len(meeting_set) > max_meetings:
                     warnings.append(f"MEETING_LIMIT_EXCEEDED:{len(meeting_set)}>{max_meetings}")
                 for meeting in sorted(meeting_set)[:max_meetings]:
+                    calendar_source = calendar_entries.get(meeting, {})
                     record = {"meeting_id": meeting, "discovered_utc": utcnow(),
                               "source_date": day, "program_pdf": "unknown",
-                              "scratching_status": "unknown", "race_numbers": []}
+                              "scratching_status": "unknown", "race_numbers": [],
+                              "calendar_source": calendar_source,
+                              "is_multi_track_product": bool(calendar_source.get("is_multi_track"))}
                     manifest["meetings"].append(record)
                     mdir = folder / "meetings" / meeting
                     mdir.mkdir(parents=True, exist_ok=True)
@@ -343,12 +357,23 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
                             structured_races.extend(parsed_program["races"])
                             pdf_races = parsed_program["qa"].get("race_numbers", [])
                             record["pdf_race_numbers"] = pdf_races
+                            # A composite Xpress PDF contains races from several
+                            # physical venues, so IDs from its pooled startlist
+                            # should NOT be compared as if it were an ordinary track.
+                            if meeting.startswith("X1_") and "xpress" in (mdir / "full_program.txt").read_text(encoding="utf-8").casefold():
+                                record["is_multi_track_product"] = True
+                            if record["is_multi_track_product"]:
+                                warnings.append(f"CROSS_MEETING_COMPOSITE_NOT_UNIQUE_TRACK:{meeting}")
                             record["parsed_horses"] = parsed_program["qa"].get("horses", 0)
                             record["parsed_history_rows"] = parsed_program["qa"].get("history_rows", 0)
                             if not pdf_races:
                                 warnings.append(f"PDF_RACE_EXTRACTION_FAILED:{meeting}")
-                            if record["race_numbers"] and set(record["race_numbers"]) != set(pdf_races):
+                            if (record["race_numbers"] and not record["is_multi_track_product"]
+                                    and set(record["race_numbers"]) != set(pdf_races)):
                                 warnings.append(f"STARTLIST_PDF_RACE_MISMATCH:{meeting}")
+                            calendar_races = calendar_source.get("race_numbers", [])
+                            if calendar_races and not record["is_multi_track_product"] and set(calendar_races) != set(pdf_races):
+                                warnings.append(f"CALENDAR_PDF_RACE_MISMATCH:{meeting}")
                             if not record["race_numbers"]:
                                 warnings.append(f"RACE_COUNT_UNVERIFIED_AGAINST_STARTLIST:{meeting}")
                             # Preserve explicit positive scratch events and avoid
@@ -419,6 +444,13 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
                 "pdf_races_parsed": len(structured_races),
                 "pdf_horses_parsed": sum(len(doc["entrants"]) for doc in structured_races),
                 "pdf_history_rows": sum(doc["qa"]["past_start_rows"] for doc in structured_races),
+                "independent_tracks": sum(not r["is_multi_track_product"] for r in manifest["meetings"]),
+                "unique_track_races": sum(len(r.get("pdf_race_numbers", [])) for r in manifest["meetings"]
+                                          if not r["is_multi_track_product"]),
+                "unique_track_horses": sum(r.get("parsed_horses", 0) for r in manifest["meetings"]
+                                           if not r["is_multi_track_product"]),
+                "unique_track_prior_starts": sum(r.get("parsed_history_rows", 0) for r in manifest["meetings"]
+                                                if not r["is_multi_track_product"]),
             }
             # Even a complete-looking snapshot remains unverified until the
             # official full daily schedule has been independently reconciled.
@@ -428,7 +460,10 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
                     and bool(r.get("pdf_race_numbers"))
                     and r["scratching_status"] == "EXPLICIT_FLAGS_OBSERVED"
                     and bool(r["race_numbers"])
-                    and set(r["race_numbers"]) == set(r["pdf_race_numbers"])
+                    and (r["is_multi_track_product"] or
+                         set(r["race_numbers"]) == set(r["pdf_race_numbers"]))
+                    and (r["is_multi_track_product"] or not r["calendar_source"].get("race_numbers") or
+                         set(r["calendar_source"]["race_numbers"]) == set(r["pdf_race_numbers"]))
                     for r in manifest["meetings"])
                 else "REVIEW_REQUIRED")
             await ctx.close()
