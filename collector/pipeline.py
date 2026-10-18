@@ -187,7 +187,8 @@ def summarize(payload: dict[str, Any], expected_races: int | None) -> dict[str, 
 async def collect(*, date: str, source_url: str, seed_urls: list[str],
                   out: Path, browser_pdf: bool, official_pdf: bool,
                   scan_races: int, expected_races: int | None,
-                  delay_s: float, robots_policy: str) -> Path:
+                  delay_s: float, robots_policy: str,
+                  browser_executable: str | None = None) -> Path:
     from playwright.async_api import async_playwright
     if not re.fullmatch(r"20\d{2}-\d{2}-\d{2}", date):
         raise ValueError("date must be YYYY-MM-DD")
@@ -200,16 +201,25 @@ async def collect(*, date: str, source_url: str, seed_urls: list[str],
         "date": date, "discovery": {"status": "unverified", "urls": [], "notes": []},
         "captures": [], "races": [], "official_pdf_files": [], "qa": {}}
     async with async_playwright() as playwright:
-        browser = await playwright.chromium.launch(headless=True)
+        launch_options = {"headless": True}
+        if browser_executable:
+            launch_options["executable_path"] = browser_executable
+        browser = await playwright.chromium.launch(**launch_options)
         context = await browser.new_context(locale="nb-NO", timezone_id="Europe/Oslo",
                                              accept_downloads=False)
         page = await context.new_page()
         robots = await check_robots(context, robots_policy)
         payload["robots"] = {"status": robots.status, "policy": robots_policy}
         if not robots.permits(source_url):
+            payload["captures"].append({"url": source_url, "status": "robots_blocked",
+                                        "captured_at_utc": now(), "error": robots.status})
+            payload["discovery"]["notes"].append(
+                "No pages requested: robots policy denied or could not be verified. "
+                "Check site permissions; do not bypass explicit disallow rules.")
+            payload["qa"] = summarize(payload, expected_races)
+            finish_outputs(folder, payload)
             await browser.close()
-            raise RuntimeError(f"robots policy denied or unavailable ({robots.status}); no pages crawled. "
-                               "Check permission before using --robots-policy warn.")
+            return folder
         first = await capture(page, source_url, folder, 0, browser_pdf=browser_pdf)
         payload["captures"].append(first)
         links = discover(first.get("html", ""), source_url, date)
