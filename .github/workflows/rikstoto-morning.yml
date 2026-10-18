@@ -59,6 +59,28 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Record GitHub trigger and scheduled Oslo execution time
+        env:
+          TRIGGER_EVENT: ${{ github.event_name }}
+        run: |
+          python - <<'PY'
+          import os
+          from datetime import datetime
+          from zoneinfo import ZoneInfo
+          now = datetime.now(ZoneInfo("Europe/Oslo"))
+          trigger = os.environ["TRIGGER_EVENT"]
+          expected = now.replace(hour=7, minute=0, second=0, microsecond=0)
+          delay = round((now - expected).total_seconds() / 60, 1)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as out:
+              out.write("## Triggerkontroll\n\n")
+              out.write(f"- Event: \`{trigger}\`\n")
+              out.write(f"- Faktisk registreringstid i Oslo: \`{now.isoformat()}\`\n")
+              if trigger == "schedule":
+                  out.write(f"- Avstand fra planlagt kl. 07:00: **{delay} minutter**\n")
+                  out.write("- Dette verifiserer en faktisk tidsstyrt kjøring, ikke bare YAML-oppsettet.\n")
+              else:
+                  out.write("- Dette er en testkjøring, IKKE verifisering av 07:00-triggeren.\n")
+          PY
       - name: Install dependencies and Chromium
         run: |
           python -m pip install -r requirements-dev.txt
