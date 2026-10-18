@@ -270,21 +270,47 @@ def run(url, strategy, out):
     else:
         allowed = False
         stamp(stages, "robots", "SKIP", "ROBOTS_UNVERIFIED", "DNS failed")
-    browser_ok = http_ok = False
+    browser_ok = http_ok = pdf_ok = False
     if allowed:
-        if strategy in ("http", "both"):
+        if strategy in ("http", "both", "all"):
             http_ok = diagnostic_http(stages, url)
-        if strategy in ("browser", "both"):
-            browser_ok = diagnostic_browser(stages, url, out_folder)
+        if strategy in ("browser", "both", "all"):
+            # Do not change access method to get around explicit HTTP denials.
+            last_http = next((e for e in reversed(stages) if e["stage"] == "http"), None)
+            if last_http and last_http["code"] in ("HTTP_403", "HTTP_429"):
+                stamp(stages, "browser", "SKIP", "HTTP_DENIAL", "Direct HTTP denied or rate-limited target")
+            else:
+                browser_ok = diagnostic_browser(stages, url, out_folder)
+        if strategy in ("pdf", "all"):
+            from .pdf_probe import candidate_url, retrieve_pdf
+            pdf_url = candidate_url(url)
+            if pdf_url is None:
+                stamp(stages, "pdf", "SKIP", "PDF_SOURCE_UNKNOWN",
+                      "Specify a known race URL including its meeting identifier.")
+            else:
+                pdf_allowed, pdf_gate_code, _ = robots_decision(robots_result, pdf_url)
+                if not pdf_allowed:
+                    stamp(stages, "pdf", "SKIP", "PDF_ROBOTS_BLOCKED",
+                          f"PDF endpoint not permitted by robots gate: {pdf_gate_code}")
+                else:
+                    report = retrieve_pdf(pdf_url, out_folder)
+                    pdf_ok = bool(report.get("ok") and report.get("text_verified"))
+                    stamp(stages, "pdf", "PASS" if pdf_ok else "WARN",
+                          report.get("code", "PDF_ERROR"),
+                          "One inferred official PDF candidate checked; never proof of complete date coverage",
+                          **report)
     else:
         stamp(stages, "http", "SKIP", "ROBOTS_UNVERIFIED", "Access gate not passed")
         stamp(stages, "browser", "SKIP", "ROBOTS_UNVERIFIED", "Access gate not passed")
+        stamp(stages, "pdf", "SKIP", "ROBOTS_UNVERIFIED", "Access gate not passed")
     status = "PAGE_REACHED" if (browser_ok or http_ok) else "NOT_REACHED"
     if browser_ok:
         status = "BROWSER_RENDERED_RACE_UNVERIFIED"
+    if pdf_ok:
+        status = "OFFICIAL_PDF_TEXT_AVAILABLE"
     output = {
         "created_utc": clock(), "target_url": url, "strategy": strategy, "status": status,
-        "success": bool(browser_ok or http_ok), "robots_allows_probe": allowed,
+        "success": bool(browser_ok or http_ok or pdf_ok), "robots_allows_probe": allowed,
         "elapsed_seconds": round(time.monotonic() - started, 2),
         "runtime": {"python": sys.version.split()[0],
                     "github_actions": bool(os.environ.get("GITHUB_ACTIONS"))},
@@ -299,7 +325,7 @@ def run(url, strategy, out):
 def main():
     p = argparse.ArgumentParser(description="Public Rikstoto connectivity: DNS -> TLS -> robots -> HTTP -> browser")
     p.add_argument("--url", default=DEFAULT_URL)
-    p.add_argument("--strategy", choices=("http", "browser", "both"), default="both")
+    p.add_argument("--strategy", choices=("http", "browser", "both", "pdf", "all"), default="all")
     p.add_argument("--out", default="diagnostics/report.json")
     # Backward-compatible alias for the original workflow.
     p.add_argument("--browser", action="store_true", help="Deprecated alias; equivalent to --strategy both")
