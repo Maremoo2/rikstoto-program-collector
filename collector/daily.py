@@ -404,7 +404,9 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18):
             # official full daily schedule has been independently reconciled.
             manifest["status"] = (
                 "CAPTURED_UNVERIFIED" if manifest["meetings"] and
-                all(r["program_pdf"] == "PDF_TEXT_OK" for r in manifest["meetings"])
+                all(r["program_pdf"] == "PDF_TEXT_OK"
+                    and r["scratching_status"] == "EXPLICIT_FLAGS_OBSERVED"
+                    and bool(r["race_numbers"]) for r in manifest["meetings"])
                 else "REVIEW_REQUIRED")
             await ctx.close()
             await browser.close()
