@@ -65,7 +65,7 @@ def parse_extended_pdf(text: str, *, meeting_id: str, date: str,
             number_source = "pdf_heading"
         else:
             standalone = [int(x.strip()) for x in heading
-                          if re.fullmatch(r"\\s*\\d{1,2}\\s*", x) and 1 <= int(x.strip()) <= 30]
+                          if re.fullmatch(r"\s*\d{1,2}\s*", x) and 1 <= int(x.strip()) <= 30]
             if standalone:
                 race_num = standalone[-1]
                 number_source = "pdf_heading_number"
