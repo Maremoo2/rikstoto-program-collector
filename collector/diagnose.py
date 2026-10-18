@@ -7,6 +7,7 @@ failures, 5xx, 403, 429, and explicit Disallow rules remain fail-closed here.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -215,24 +216,55 @@ def diagnostic_browser(stages, url, out_folder):
             browser = p.chromium.launch(headless=True)
             context = browser.new_context(locale="nb-NO", timezone_id="Europe/Oslo")
             page = context.new_page()
-            js_errors, console_errors, requests = [], [], []
+            js_errors, console_errors, requests, api_matches = [], [], [], []
             page.on("pageerror", lambda exc: js_errors.append(str(exc)[:350]))
             page.on("console", lambda message: console_errors.append(message.text[:350])
                     if message.type == "error" and len(console_errors) < 15 else None)
             def track(response):
-                if len(requests) >= 40 or response.request.resource_type not in ("xhr", "fetch"):
+                if response.request.resource_type not in ("xhr", "fetch"):
                     return
                 parsed = urlparse(response.url)
                 if parsed.hostname != HOST:
                     return
-                requests.append({"url_without_query": urlunparse((parsed.scheme, parsed.netloc,
-                                                                  parsed.path, "", "", "")),
-                                 "status": response.status,
-                                 "type": response.request.resource_type})
+                meeting_match = re.search(r"/Spill/([A-Z0-9]+_NR_20\d{2}-\d{2}-\d{2})/", url, re.I)
+                if meeting_match:
+                    meeting = meeting_match.group(1)
+                    if (parsed.path == f"/api/racedays/{meeting}/starts"
+                        or parsed.path.startswith(f"/api/game/program/{meeting}/")):
+                        if response.status == 200 and len(api_matches) < 4:
+                            api_matches.append(response)
+                if len(requests) < 60:
+                    requests.append({"url_without_query": urlunparse((parsed.scheme, parsed.netloc,
+                                                                      parsed.path, "", "", "")),
+                                     "status": response.status,
+                                     "type": response.request.resource_type})
             page.on("response", track)
             try:
                 response = page.goto(url, wait_until="domcontentloaded", timeout=30000)
                 page.wait_for_timeout(3500)
+                api_saved = []
+                for source in api_matches:
+                    name = "program" if "/api/game/program/" in urlparse(source.url).path else "starts"
+                    name = f"api_{name}.json"
+                    if (out_folder / name).exists():
+                        continue
+                    try:
+                        raw = source.body()
+                        if len(raw) > 5_000_000:
+                            api_saved.append({"file": name, "code": "API_TOO_LARGE",
+                                              "bytes": len(raw)})
+                            continue
+                        value = json.loads(raw.decode("utf-8"))
+                        (out_folder / name).write_text(
+                            json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
+                        api_saved.append({"file": name, "code": "API_JSON_SAVED",
+                                          "bytes": len(raw),
+                                          "sha256": hashlib.sha256(raw).hexdigest(),
+                                          "root_type": type(value).__name__,
+                                          "top_level_keys": list(value.keys())[:30] if isinstance(value, dict) else []})
+                    except Exception as api_error:
+                        api_saved.append({"file": name, "code": "API_READ_FAILED",
+                                          "error": str(api_error)[:250]})
                 text = page.locator("body").inner_text(timeout=15000)
                 html = page.content()
                 status = response.status if response else None
@@ -255,7 +287,7 @@ def diagnostic_browser(stages, url, out_folder):
                       final_url=final_url, signals=signals,
                       text_preview=re.sub(r"\s+", " ", text)[:350],
                       javascript_errors=js_errors, console_errors=console_errors,
-                      public_xhr_fetch=requests,
+                      public_xhr_fetch=requests, saved_public_api=api_saved,
                       screenshot="browser.png")
                 result = state == "PASS"
             except Exception as exc:
