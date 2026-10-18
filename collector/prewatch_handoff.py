@@ -16,6 +16,21 @@ HISTORY_LIMIT = 500
 SCHEMA = "prewatch_source_v1"
 
 
+# Snapshot QA only: never infer current scratches, betting prices or A-WATCH.
+SOURCE_READY_STATUSES = {"MATCHED_AS_OF_SNAPSHOT"}
+
+
+def source_readiness(meeting):
+    audit = meeting.get("startlist_pdf_audit") or {}
+    status = audit.get("status", "UNKNOWN")
+    ready = status in SOURCE_READY_STATUSES
+    return {
+        "source_ready_snapshot": ready,
+        "source_blocker": None if ready else "PDF_STARTLIST_NOT_FULLY_RECONCILED",
+        "meeting_source_status": status,
+    }
+
+
 def compact(value, limit=160):
     if value is None:
         return "UNKNOWN"
@@ -92,6 +107,7 @@ def build_handoff(root: Path, dest: Path):
         if not docs:
             index["no_race_meetings"].append(mid)
             continue
+        readiness = source_readiness(meeting)
         header = (
             "# PRE-WATCH DATA FEED (not a betting recommendation)\n\n"
             f"Schema={SCHEMA} | Date={day} Europe/Oslo | Run={run_id}\n"
@@ -100,6 +116,8 @@ def build_handoff(root: Path, dest: Path):
             f"Source ZIP tag={index['source_archive_tag']}"
             f" | PDF/Startlist audit={meeting.get('startlist_pdf_audit', {}).get('status', 'UNKNOWN')}\n"
             f"Collection status={m.get('status')} | Snapshot UTC={m.get('created_utc')}\n"
+            f"Source ready snapshot={readiness['source_ready_snapshot']}"
+            f" | Source blocker={readiness['source_blocker'] or 'NONE'}\n"
             "This is historical/static source evidence for shortlisting, NOT a fresh WIN market."
             " Recheck current scratches, equipment, start times and prices before action.\n"
             "Raw previous-start lines are limited excerpts and are NOT complete trip interpretation.\n\n"
@@ -132,8 +150,12 @@ def build_handoff(root: Path, dest: Path):
                 "race_numbers": race_numbers_in_part,
                 "body_length": len(text),
                 "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
-                "meeting_source_status": meeting.get("startlist_pdf_audit", {}).get("status"),
+                **readiness,
             })
+    index["source_ready_races"] = sum(item["race_count"] for item in index["meeting_feeds"]
+                                      if item["source_ready_snapshot"])
+    index["source_blocked_races"] = sum(item["race_count"] for item in index["meeting_feeds"]
+                                        if not item["source_ready_snapshot"])
     index["meeting_count"] = len(meetings)
     index["race_count"] = sum(len(races.get(x["meeting_id"], [])) for x in meetings)
     index["runner_count"] = sum(len(doc.get("entrants", []))
@@ -152,7 +174,9 @@ def build_handoff(root: Path, dest: Path):
     ]
     for item in index["meeting_feeds"]:
         lines.append(f"- {item['release_tag']} | race_numbers={item['race_numbers']}"
-                     f" | sha256={item['sha256'][:16]}")
+                     f" | sha256={item['sha256'][:16]}"
+                     f" | source_ready_snapshot={item['source_ready_snapshot']}"
+                     f" | source_blocker={item['source_blocker'] or 'NONE'}")
     lines += [
         "",
         "MORNING SNAPSHOT ONLY: check fresh official scratched/gear changes and race-start clock.",
