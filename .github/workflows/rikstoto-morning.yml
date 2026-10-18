@@ -1,0 +1,98 @@
+name: Daily Rikstoto full programs – 07 Oslo
+
+on:
+  schedule:
+    - cron: '0 7 * * *'
+      timezone: Europe/Oslo
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Optional YYYY-MM-DD; blank means today in Norway"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rikstoto-morning-collector
+  cancel-in-progress: false
+
+jobs:
+  full-day:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      SELECTED_DATE: ${{ inputs.date || '' }}
+      TZ: Europe/Oslo
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies and Chromium
+        run: |
+          python -m pip install -r requirements-dev.txt
+          python -m playwright install --with-deps chromium
+      - name: Run tests before source collection
+        run: python -m pytest -q
+      - name: Collect all discoverable meetings and official full PDFs
+        id: harvest
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          if [ -n "$SELECTED_DATE" ]; then
+            python -m collector.daily --date "$SELECTED_DATE" --out output/daily 2>&1 | tee daily-console.log
+          else
+            python -m collector.daily --out output/daily 2>&1 | tee daily-console.log
+          fi
+      - name: Summarize meetings, PDFs and scratchings
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          files = sorted(Path("output/daily").glob("*/*/manifest.json"))
+          summary = Path(os.environ["GITHUB_STEP_SUMMARY"])
+          with summary.open("a", encoding="utf-8") as out:
+              out.write("# Morgenhenting fra Rikstoto (07:00 Oslo)\n\n")
+              if not files:
+                  out.write("**INGEN RAPPORT:** Jobben ble avbrutt før kildene kunne kontrolleres. Se logg.\n")
+              else:
+                  doc = json.loads(files[-1].read_text(encoding="utf-8"))
+                  counts = doc.get("counts", {})
+                  out.write(f"**Dato:** {doc['date_oslo']}  \n"
+                            f"**Status:** {doc['status']}  \n"
+                            f"**Fullstendighet verifisert:** {doc['completeness_verified']}  \n"
+                            f"**Baner/møter funnet:** {counts.get('meetings_discovered', 0)}  \n"
+                            f"**Offisielle program-PDF-er:** {counts.get('full_program_pdfs', 0)}  \n"
+                            f"**Positivt identifiserte strykninger:** {counts.get('scratches_positively_identified', 0)}  \n\n")
+                  out.write("| Møte-ID | Fullt program | Strykningskilde | Løp funnet | Strykninger |\n")
+                  out.write("|---|---|---|---|---|\n")
+                  for m in doc.get("meetings", []):
+                      out.write(f"| {m['meeting_id']} | {m['program_pdf']} | {m['scratching_status']} | "
+                                f"{len(m['race_numbers'])} | {m.get('positive_scratches', 0)} |\n")
+                  out.write("\n### Varsler\n\n")
+                  for warning in doc.get("warnings", []):
+                      out.write(f"- \x60{warning}\x60\n")
+                  out.write("\n**Dette er et øyeblikksbilde. Ingen påstand om fullstendige baner/løp "
+                            "eller endelige strykninger uten separat kildekontroll.**\n")
+          PY
+      - name: Save daily evidence and full programs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rikstoto-morning-programs
+          path: |
+            output/daily/
+            daily-console.log
+          if-no-files-found: warn
+          retention-days: 90
+          compression-level: 6
+      - name: Flag incomplete or unsuccessful collection
+        if: steps.harvest.outcome == 'failure'
+        run: |
+          echo "Collection incomplete: inspect job summary, warnings and downloaded files."
+          exit 1
