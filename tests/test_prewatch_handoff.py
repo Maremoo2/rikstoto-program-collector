@@ -73,6 +73,8 @@ def test_one_meeting_feed_excludes_composite_and_france(tmp_path):
     assert "X1_NR" not in body
     assert "F1_NR" not in body
     assert len(body) <= 95_000
+    assert part["race_numbers"] == [6]
+    assert "race_numbers=[6]" in (dest / "index.md").read_text(encoding="utf-8")
     assert "not a betting recommendation" in body
     assert result["date_oslo"] == DAY
     assert "prewatch-src-2026-10-18-OR_NR_2026-10-18" in part["release_tag"]
