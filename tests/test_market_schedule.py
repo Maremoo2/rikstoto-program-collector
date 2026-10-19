@@ -44,7 +44,7 @@ def test_missing_race_times_fail_closed():
 
 def test_dst_offset_aware():
     m = [{"meeting_id": "TEST", "races": [{"race_number": 1, "start_utc": "2026-10-25T11:00:00Z"}]}]
-    now = datetime(2026, 10, 25, 11, 20, tzinfo=OSLO)
+    now = datetime(2026, 10, 25, 11, 21, tzinfo=OSLO)
     result = plan_market_checks(m, now=now)
     assert result["events"][0]["target_oslo"] == "2026-10-25T11:30:00+01:00"
 
