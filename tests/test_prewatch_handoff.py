@@ -18,7 +18,8 @@ def write_fixture(tmp_path):
     entries = [
         {"meeting_id": "OR_NR_2026-10-18", "is_multi_track_product": False,
          "listing_source": {"country": "NO", "track": "Varig Orkla"},
-         "startlist_pdf_audit": {"status": "MATCHED_AS_OF_SNAPSHOT"}},
+         "startlist_pdf_audit": {"status": "MATCHED_AS_OF_SNAPSHOT",
+                                 "race_numbers_match": True, "race_matches": 1}},
         {"meeting_id": "X1_NR_2026-10-18", "is_multi_track_product": True,
          "listing_source": {"country": "", "track": "Xpress"}},
         {"meeting_id": "F1_NR_2026-10-18", "is_multi_track_product": False,
@@ -150,8 +151,73 @@ def test_race_queue_exposes_review_blockers_without_bet_inference(tmp_path):
     assert race["race_key"] == "OR_NR_2026-10-18|6"
     assert race["runner_count"] == 1
     assert race["history_rows"] == 2
-    assert "RACE_QA_WARNINGS_REVIEW" in race["source_blockers"]
-    assert result["queue_ready_races"] == 0
-    assert result["queue_review_races"] == 1
+    assert race["source_blockers"] == []
+    assert race["source_ready_snapshot"] is True
+    assert race["race_qa_advisories"] == ["SCRATCH_STATUS_MAY_CHANGE"]
+    assert race["race_qa_review_warnings"] == []
+    assert result["queue_ready_races"] == 1
+    assert result["queue_review_races"] == 0
     assert "BET" not in race
     assert "p_win" not in race
+
+
+def test_normal_morning_snapshot_warnings_do_not_block_fully_matched_race(tmp_path):
+    root = write_fixture(tmp_path)
+    f = next(root.glob("*/*/structured_program_day.json"))
+    data = json.loads(f.read_text(encoding="utf-8"))
+    data["races"][0]["qa"]["warnings"] = [
+        "PDF_SNAPSHOT_NOT_LIVE", "SCRATCH_STATUS_MAY_CHANGE", "RACE_NUMBER_INFERRED"]
+    data["races"][0]["race"]["race_number_source"] = "pdf_order_inferred"
+    f.write_text(json.dumps(data), encoding="utf-8")
+    result = build_handoff(root, tmp_path / "handoff")
+    race = result["race_queue"][0]
+    assert result["queue_ready_races"] == 1
+    assert result["queue_review_races"] == 0
+    assert race["source_blockers"] == []
+    assert race["race_qa_review_warnings"] == []
+    assert race["race_qa_advisories"] == data["races"][0]["qa"]["warnings"]
+    assert result["collection_status"] == "CAPTURED_UNVERIFIED"
+
+
+def test_inferred_race_number_still_blocks_without_independent_race_set_match(tmp_path):
+    root = write_fixture(tmp_path)
+    manifest = next(root.glob("*/*/manifest.json"))
+    meta = json.loads(manifest.read_text(encoding="utf-8"))
+    meta["meetings"][0]["startlist_pdf_audit"]["race_numbers_match"] = False
+    manifest.write_text(json.dumps(meta), encoding="utf-8")
+    f = next(root.glob("*/*/structured_program_day.json"))
+    data = json.loads(f.read_text(encoding="utf-8"))
+    data["races"][0]["qa"]["warnings"] = ["RACE_NUMBER_INFERRED"]
+    f.write_text(json.dumps(data), encoding="utf-8")
+    result = build_handoff(root, tmp_path / "blocked")
+    assert result["queue_ready_races"] == 0
+    assert result["race_queue"][0]["race_qa_review_warnings"] == ["RACE_NUMBER_INFERRED"]
+    assert "RACE_QA_WARNINGS_REVIEW" in result["race_queue"][0]["source_blockers"]
+
+
+@pytest.mark.parametrize("warning", ["HORSE_NAME_MISMATCH", "SCRATCHES_UNVERIFIED",
+                                     "NO_ENTRANTS_PARSED", "NEW_UNRECOGNIZED_QA_CODE"])
+def test_genuine_or_unknown_warning_still_blocks_race(tmp_path, warning):
+    root = write_fixture(tmp_path)
+    f = next(root.glob("*/*/structured_program_day.json"))
+    data = json.loads(f.read_text(encoding="utf-8"))
+    data["races"][0]["qa"]["warnings"] = [warning, "PDF_SNAPSHOT_NOT_LIVE"]
+    f.write_text(json.dumps(data), encoding="utf-8")
+    result = build_handoff(root, tmp_path / "review")
+    assert result["queue_ready_races"] == 0
+    race = result["race_queue"][0]
+    assert "RACE_QA_WARNINGS_REVIEW" in race["source_blockers"]
+    assert warning in race["race_qa_review_warnings"]
+    assert race["race_qa_advisories"] == ["PDF_SNAPSHOT_NOT_LIVE"]
+
+
+def test_partial_startlist_remains_blocked_even_if_warnings_are_advisory(tmp_path):
+    root = write_fixture(tmp_path)
+    f = next(root.glob("*/*/manifest.json"))
+    doc = json.loads(f.read_text(encoding="utf-8"))
+    doc["meetings"][0]["startlist_pdf_audit"]["status"] = "PARTIAL_OR_UNVERIFIED"
+    f.write_text(json.dumps(doc), encoding="utf-8")
+    result = build_handoff(root, tmp_path / "review")
+    race = result["race_queue"][0]
+    assert result["queue_ready_races"] == 0
+    assert "PDF_STARTLIST_NOT_FULLY_RECONCILED" in race["source_blockers"]
