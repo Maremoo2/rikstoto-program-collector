@@ -19,6 +19,35 @@ SCHEMA = "prewatch_source_v1"
 # Snapshot QA only: never infer current scratches, betting prices or A-WATCH.
 SOURCE_READY_STATUSES = {"MATCHED_AS_OF_SNAPSHOT"}
 
+# These describe the freshness limits of every honest morning capture.
+# They MUST remain visible, but are not failed PDF/startlist QA.
+ADVISORY_RACE_WARNINGS = {"PDF_SNAPSHOT_NOT_LIVE", "SCRATCH_STATUS_MAY_CHANGE"}
+
+
+def classify_race_warnings(qa, *, meeting_audit):
+    """Separate source-freshness notices from genuine reconciliation blockers.
+
+    A PDF-inferred race number is safe for source shortlisting ONLY if the
+    independent official startlist explicitly validated the entire race set.
+    All unknown/future warning codes fail closed, pending human review.
+    """
+    raw = qa.get("warnings", [])
+    if not isinstance(raw, list) or any(not isinstance(w, str) for w in raw):
+        return [], ["MALFORMED_RACE_QA_WARNINGS"]
+    advisories, review = [], []
+    for warning in raw:
+        if warning in ADVISORY_RACE_WARNINGS:
+            advisories.append(warning)
+        elif warning == "RACE_NUMBER_INFERRED" and (
+            meeting_audit.get("status") == "MATCHED_AS_OF_SNAPSHOT"
+            and meeting_audit.get("race_numbers_match") is True
+        ):
+            advisories.append(warning)
+        else:
+            review.append(warning)
+    return advisories, review
+
+
 
 def source_readiness(meeting):
     audit = meeting.get("startlist_pdf_audit") or {}
@@ -119,7 +148,9 @@ def build_handoff(root: Path, dest: Path):
                 blockers.append("NO_RUNNERS")
             if not race.get("scheduled_time_local"):
                 blockers.append("START_TIME_UNKNOWN")
-            if qa.get("warnings"):
+            advisories, review_warnings = classify_race_warnings(
+                qa, meeting_audit=meeting.get("startlist_pdf_audit") or {})
+            if review_warnings:
                 blockers.append("RACE_QA_WARNINGS_REVIEW")
             index["race_queue"].append({
                 "race_key": f"{mid}|{race['race_number']}",
@@ -130,6 +161,8 @@ def build_handoff(root: Path, dest: Path):
                 "history_rows": qa.get("past_start_rows", 0),
                 "source_ready_snapshot": not blockers,
                 "source_blockers": blockers,
+                "race_qa_advisories": advisories,
+                "race_qa_review_warnings": review_warnings,
                 "source_release_tag_prefix": f"prewatch-src-{day}-{mid}-",
             })
         header = (
