@@ -1,0 +1,87 @@
+"""Read-only public WIN market source discovery. Diagnostic, NOT an odds feed.
+
+Only explicitly supplied first-party race URL; robots and HTTP refusal fail closed.
+Records metadata of observed same-host XHR/fetch requests, not private payloads.
+"""
+from __future__ import annotations
+
+import argparse
+import asyncio
+import json
+from datetime import datetime, timezone
+from pathlib import Path
+from urllib.parse import urlparse
+
+from .pipeline import DOMAIN, check_robots, source_allowed
+
+
+def validate_probe_url(url: str) -> bool:
+    parsed = urlparse(url)
+    return (source_allowed(url) and parsed.port in (None, 443)
+            and parsed.path.lower().startswith("/spill/")
+            and "/api/" not in parsed.path.lower()
+            and not parsed.username and not parsed.password)
+
+
+async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
+    report = {"schema": "prewatch_win_source_probe_v1",
+              "url": url, "captured_utc": datetime.now(timezone.utc).isoformat(),
+              "status": "BLOCKED", "odds_captured": False,
+              "win_market_verified": False, "bet_authorized": False,
+              "observed_public_requests": []}
+    if not validate_probe_url(url):
+        report["reason"] = "URL_NOT_PUBLIC_FIRST_PARTY_RACE_PAGE"
+        return report
+    from playwright.async_api import async_playwright
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        try:
+            context = await browser.new_context(locale="nb-NO", timezone_id="Europe/Oslo")
+            robots = await check_robots(context, "strict")
+            if not robots.permits(url):
+                report["reason"] = "ROBOTS_UNVERIFIED_OR_DISALLOWED"
+                return report
+            page = await context.new_page()
+            observed = []
+            def capture_response(response):
+                u = urlparse(response.url)
+                if (u.scheme == "https" and u.hostname == DOMAIN
+                        and response.request.resource_type in ("xhr", "fetch")
+                        and len(observed) < 80):
+                    observed.append({"path": u.path, "status": response.status,
+                                     "resource_type": response.request.resource_type})
+            page.on("response", capture_response)
+            response = await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
+            report["page_http_status"] = response.status if response else None
+            if response is None or response.status != 200:
+                report["reason"] = "PAGE_HTTP_NOT_200"
+                return report
+            await page.wait_for_timeout(2000)
+            body = await page.locator("body").inner_text(timeout=timeout_ms)
+            report["observed_public_requests"] = observed
+            report["body_mentions_win"] = "vinner" in body.casefold()
+            report["body_mentions_odds"] = "odds" in body.casefold()
+            report["status"] = "DIAGNOSTIC_CAPTURED"
+            report["reason"] = "REQUEST_METADATA_ONLY;WIN_SCHEMA_UNVERIFIED"
+            return report
+        except Exception as exc:
+            report["reason"] = f"PROBE_ERROR:{type(exc).__name__}"
+            return report
+        finally:
+            await browser.close()
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--url", required=True, help="Explicit verified public race URL")
+    parser.add_argument("--output", default="win_source_probe.json")
+    args = parser.parse_args()
+    result = asyncio.run(probe(args.url))
+    target = Path(args.output)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(json.dumps(result, indent=2), encoding="utf-8")
+    print(json.dumps(result, indent=2))
+
+
+if __name__ == "__main__":
+    main()
