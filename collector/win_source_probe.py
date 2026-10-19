@@ -8,9 +8,27 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
+
+CANDIDATE_PATH = re.compile(r"odds|vinner|winner|price|pool|market|betting", re.I)
+SENSITIVE_KEY = re.compile(r"token|auth|session|cookie|email|password|secret|account|person", re.I)
+
+
+def schema_outline(value, depth=0):
+    """Only public JSON structure and types, never values or credentials."""
+    if depth >= 3:
+        return type(value).__name__
+    if isinstance(value, dict):
+        return {str(k): schema_outline(v, depth + 1) for k, v in list(value.items())[:30]
+                if not SENSITIVE_KEY.search(str(k))}
+    if isinstance(value, list):
+        return {"type": "array", "count": len(value),
+                "item": schema_outline(value[0], depth + 1) if value else None}
+    return type(value).__name__
+
 
 from .pipeline import DOMAIN, check_robots, source_allowed
 
@@ -43,6 +61,24 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                 return report
             page = await context.new_page()
             observed = []
+            candidate_responses = []
+            async def inspect_candidate(response):
+                u = urlparse(response.url)
+                if (u.scheme != "https" or u.hostname != DOMAIN or
+                        response.status != 200 or not CANDIDATE_PATH.search(u.path) or
+                        len(candidate_responses) >= 12):
+                    return
+                entry = {"path": u.path, "http_status": response.status}
+                try:
+                    content_type = response.headers.get("content-type", "")
+                    if "json" not in content_type.lower():
+                        entry["reason"] = "NOT_JSON"
+                    else:
+                        payload = await response.json()
+                        entry["schema_outline"] = schema_outline(payload)
+                except Exception as exc:
+                    entry["reason"] = f"UNREADABLE:{type(exc).__name__}"
+                candidate_responses.append(entry)
             def capture_response(response):
                 u = urlparse(response.url)
                 if (u.scheme == "https" and u.hostname == DOMAIN
@@ -50,6 +86,9 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                         and len(observed) < 80):
                     observed.append({"path": u.path, "status": response.status,
                                      "resource_type": response.request.resource_type})
+                    if CANDIDATE_PATH.search(u.path):
+                        tasks.append(asyncio.create_task(inspect_candidate(response)))
+            tasks = []
             page.on("response", capture_response)
             response = await page.goto(url, wait_until="domcontentloaded", timeout=timeout_ms)
             report["page_http_status"] = response.status if response else None
@@ -58,6 +97,9 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                 return report
             await page.wait_for_timeout(2000)
             body = await page.locator("body").inner_text(timeout=timeout_ms)
+            if tasks:
+                await asyncio.gather(*tasks, return_exceptions=True)
+            report["candidate_response_schemas"] = candidate_responses
             report["observed_public_requests"] = observed
             report["body_mentions_win"] = "vinner" in body.casefold()
             report["body_mentions_odds"] = "odds" in body.casefold()
