@@ -17,16 +17,16 @@ CANDIDATE_PATH = re.compile(r"odds|vinner|winner|price|pool|market|betting", re.
 SENSITIVE_KEY = re.compile(r"token|auth|session|cookie|email|password|secret|account|person", re.I)
 
 
-def schema_outline(value, depth=0):
+def schema_outline(value, depth=0, max_depth=3):
     """Only public JSON structure and types, never values or credentials."""
-    if depth >= 3:
+    if depth >= max_depth:
         return type(value).__name__
     if isinstance(value, dict):
-        return {str(k): schema_outline(v, depth + 1) for k, v in list(value.items())[:30]
+        return {str(k): schema_outline(v, depth + 1, max_depth) for k, v in list(value.items())[:30]
                 if not SENSITIVE_KEY.search(str(k))}
     if isinstance(value, list):
         return {"type": "array", "count": len(value),
-                "item": schema_outline(value[0], depth + 1) if value else None}
+                "item": schema_outline(value[0], depth + 1, max_depth) if value else None}
     return type(value).__name__
 
 
@@ -75,7 +75,7 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                         entry["reason"] = "NOT_JSON"
                     else:
                         payload = await response.json()
-                        entry["schema_outline"] = schema_outline(payload)
+                        entry["schema_outline"] = schema_outline(payload, max_depth=7 if "/winodds" in u.path.lower() else 3)
                 except Exception as exc:
                     entry["reason"] = f"UNREADABLE:{type(exc).__name__}"
                 candidate_responses.append(entry)
