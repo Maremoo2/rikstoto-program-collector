@@ -1,0 +1,66 @@
+name: WIN source diagnostic – manual or workflow change
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/win-source-diagnostic.yml'
+  workflow_dispatch:
+    inputs:
+      race_url:
+        description: "Public Rikstoto race URL to inspect (not a betting action)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: win-source-diagnostic
+  cancel-in-progress: false
+
+jobs:
+  inspect-public-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    env:
+      RACE_URL: ${{ inputs.race_url || 'https://www.rikstoto.no/Spill/S2_NR_2026-10-19/V?race=9&p=9:0' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies and Chromium
+        run: |
+          python -m pip install -r requirements-dev.txt
+          python -m playwright install --with-deps chromium
+      - name: Validate source probe tests
+        run: python -m pytest -q tests/test_win_source_probe.py tests/test_odds_snapshot.py
+      - name: Probe observed public race requests
+        run: |
+          python -m collector.win_source_probe --url "$RACE_URL" --output output/win_source_probe.json
+      - name: Summarize diagnostic without claiming WIN odds
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          p=Path('output/win_source_probe.json')
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write('## WIN source diagnostic (no betting)\n\n')
+              if not p.exists():
+                  f.write('No diagnostic output. Source blocked or execution failed.\n')
+              else:
+                  d=json.loads(p.read_text())
+                  f.write(f"- Status: `{d['status']}`\n")
+                  f.write(f"- Reason: `{d.get('reason','UNKNOWN')}`\n")
+                  f.write(f"- Observed public XHR/fetch requests: {len(d['observed_public_requests'])}\n")
+                  f.write('- **WIN odds verified: NO. No bets or scheduled market polling.**\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: win-source-diagnostic
+          path: output/win_source_probe.json
+          if-no-files-found: warn
+          retention-days: 7
