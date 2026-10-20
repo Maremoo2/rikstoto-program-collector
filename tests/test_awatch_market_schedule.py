@@ -90,3 +90,24 @@ def test_win_collector_past_race_never_probes():
             "races": [old]}], now=NOW))
         fake.assert_not_called()
     assert result["probed_race_count"] == 0
+
+
+def test_end_to_end_phase_b_selection_mixed_races():
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+    from collector.awatch_win_collector import collect
+    sample = [{"meeting_id": "S2_NR_2026-10-20",
+               "races": [race(1, 70), race(2, 69), race(3, 95, False),
+                         race(4, 88, True, "PASS")]}]
+    with patch("collector.awatch_win_collector.probe",
+               new_callable=AsyncMock) as fake:
+        fake.return_value = {"status": "BLOCKED", "reason": "STALE_MARKET_ODDS"}
+        output = asyncio.run(collect(sample, now=NOW))
+        fake.assert_awaited_once()
+        assert "race=1" in fake.await_args.args[0]
+    assert output["probed_race_count"] == 1
+    assert output["schedule"]["selected_race_count"] == 1
+    assert len(output["schedule"]["rejected"]) == 3
+    assert output["races"][0]["diagnostic"]["status"] == "BLOCKED"
+    assert output["bet_authorized"] is False
+    assert output["automated_betting"] is False
