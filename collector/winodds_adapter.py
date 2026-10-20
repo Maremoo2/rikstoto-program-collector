@@ -71,8 +71,8 @@ def parse_public_winodds(response: dict[str, Any], *, meeting_id: str,
             errors.append("UNKNOWN_OR_SCRATCHED_RUNNER")
         rows.append({"number": number, "name": expected_runners.get(number, ""),
                      "win_odds": odd})
-    if len(set(parsed_market_times)) > 1:
-        errors.append("MIXED_MARKET_UPDATE_TIMES")
+    # Pool prices may update per runner; do not require identical timestamps.
+    # Each quote must independently pass the configured freshness bound.
     snapshot = {"schema": SCHEMA, "market": "WIN", "meeting_id": meeting_id,
                 "race_number": race_number, "captured_utc": captured_utc,
                 "scratches_verified": scratches_verified, "runners": rows}
