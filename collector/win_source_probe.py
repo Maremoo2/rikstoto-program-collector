@@ -126,6 +126,17 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                         pass
             report["source_capture_counts"] = {
                 "winodds": len(raw_winodds), "official_starts": len(raw_startlists)}
+            if raw_winodds and race_match:
+                chosen = raw_winodds[-1].get("result", {}).get(race_match.group(1), [])
+                report["win_row_quality"] = {
+                    "rows": len(chosen),
+                    "missing_or_invalid_timestamps": sum(
+                        not isinstance(row.get("lastUpdated"), str) or not row.get("lastUpdated")
+                        for row in chosen if isinstance(row, dict)),
+                    "nonpositive_odds": sum(
+                        type(row.get("odds")) in (int, float) and row["odds"] <= 1
+                        for row in chosen if isinstance(row, dict)),
+                }
             if match and race_match and raw_winodds and raw_startlists:
                 race_number = int(race_match.group(1))
                 start_rows = raw_startlists[-1].get("result", {}).get(str(race_number))
@@ -140,6 +151,7 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                         raw_winodds[-1], meeting_id=match.group(1),
                         race_number=race_number, captured_utc=report["captured_utc"],
                         expected_runners=expected, scratches_verified=True)
+                    report["startlist_scratch_numbers"] = [h["startNumber"] for h in start_rows if h["isScratched"]]
                     report["win_startlist_audit"] = {
                         "status": audit["status"], "errors": audit["errors"],
                         "runner_count": len(expected),
