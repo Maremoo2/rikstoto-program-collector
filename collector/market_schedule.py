@@ -65,3 +65,40 @@ def plan_market_checks(meetings: list[dict[str, Any]], *, now: datetime,
             "events": sorted(events, key=lambda x: (x["target_oslo"], x["meeting_id"])),
             "warnings": sorted(set(warnings)), "odds_captured": False,
             "bet_authorized": False}
+
+
+def plan_awatch_market_checks(meetings: list[dict[str, Any]], *, now: datetime,
+                              lookahead_minutes: int = 10) -> dict[str, Any]:
+    """Phase B only: gate collection on explicitly qualified A-WATCH races.
+
+    Missing scores, gate failures and unverified race times fail closed. This
+    does not alter the V3.3.12 scoring model or authorize a BET.
+    """
+    selected = []
+    rejected = []
+    for meeting in meetings:
+        mid = meeting.get("meeting_id")
+        qualified = []
+        for race in meeting.get("races", []):
+            score = race.get("prewatch_score")
+            gates = race.get("prewatch_gates_passed")
+            status = race.get("prewatch_status")
+            if (type(score) in (int, float) and not isinstance(score, bool)
+                    and 70 <= score <= 100 and gates is True
+                    and status == "A-WATCH"):
+                qualified.append(race)
+            else:
+                rejected.append({"meeting_id": mid, "race_number": race.get("race_number"),
+                                 "reason": "NOT_QUALIFIED_A_WATCH"})
+        if qualified:
+            selected.append({"meeting_id": mid, "races": qualified})
+    result = plan_market_checks(selected, now=now,
+                                lookahead_minutes=lookahead_minutes)
+    # Meeting-level checks are retained only for meetings containing A-WATCH.
+    result["schema"] = "prewatch_awatch_market_schedule_v1"
+    result["phase"] = "B_MARKET_ONLY"
+    result["rejected"] = rejected
+    result["selected_race_count"] = sum(len(m["races"]) for m in selected)
+    result["prewatch_requires_win_odds"] = False
+    result["bet_authorized"] = False
+    return result
