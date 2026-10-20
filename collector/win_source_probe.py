@@ -162,7 +162,8 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                     audit = parse_public_winodds(
                         normalized_source, meeting_id=match.group(1),
                         race_number=race_number, captured_utc=report["captured_utc"],
-                        expected_runners=expected, scratches_verified=True)
+                        expected_runners=expected, scratches_verified=True,
+                        source_timezone="Europe/Oslo")
                     report["startlist_scratch_numbers"] = sorted(scratched)
                     report["excluded_verified_scratch_quotes"] = len(original_rows) - len(cleaned_rows)
                     report["win_startlist_audit"] = {
@@ -171,6 +172,7 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                         "api_odds": [{"number": row["number"], "odds": row["win_odds"]}
                                      for row in audit.get("snapshot", {}).get("runners", [])],
                         "market_last_updated": audit.get("market_last_updated", []),
+                        "source_timezone_assumption": "Europe/Oslo (unverified; no BET authorization)",
                         "screen_comparison": "NOT_VERIFIED",
                         "bet_authorized": False}
                 else:
@@ -186,7 +188,7 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
             report["body_mentions_win"] = "vinner" in body.casefold()
             report["body_mentions_odds"] = "odds" in body.casefold()
             report["status"] = "DIAGNOSTIC_CAPTURED"
-            report["reason"] = "REQUEST_METADATA_ONLY;WIN_SCHEMA_UNVERIFIED"
+            report["reason"] = "WIN_AUDIT_" + report["win_startlist_audit"]["status"] + ";SCREEN_NOT_VERIFIED"
             return report
         except Exception as exc:
             report["reason"] = f"PROBE_ERROR:{type(exc).__name__}"
