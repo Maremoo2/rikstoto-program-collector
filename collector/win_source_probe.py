@@ -112,6 +112,17 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
             # Do not claim screen agreement or live trading authorization.
             match = re.search(r"/Spill/([^/]+)/", url, re.I)
             race_match = re.search(r"(?:^|[?&])race=(\\d+)", url)
+            # The odds page need not request starts itself. Query the observed
+            # official first-party starts endpoint only when robots permits it.
+            if match and raw_winodds and not raw_startlists:
+                starts_url = f"https://{DOMAIN}/api/racedays/{match.group(1)}/starts"
+                if robots.permits(starts_url):
+                    try:
+                        starts_response = await context.request.get(starts_url, timeout=timeout_ms)
+                        if starts_response.status == 200 and "json" in starts_response.headers.get("content-type", "").lower():
+                            raw_startlists.append(await starts_response.json())
+                    except Exception:
+                        pass
             if match and race_match and raw_winodds and raw_startlists:
                 race_number = int(race_match.group(1))
                 start_rows = raw_startlists[-1].get("result", {}).get(str(race_number))
