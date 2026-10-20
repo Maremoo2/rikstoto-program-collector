@@ -147,11 +147,23 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                 ):
                     expected = {h["startNumber"]: h["horseName"]
                                 for h in start_rows if not h["isScratched"]}
+                    # Exclude only officially scratched runners from the audit input.
+                    # Keep unknown runner numbers and invalid active prices fail-closed.
+                    scratched = {h["startNumber"] for h in start_rows if h["isScratched"]}
+                    source = raw_winodds[-1]
+                    source_races = source.get("result", {})
+                    original_rows = source_races.get(str(race_number), [])
+                    cleaned_rows = [row for row in original_rows
+                                    if not (isinstance(row, dict) and row.get("startNumber") in scratched)]
+                    normalized_source = dict(source)
+                    normalized_source["result"] = dict(source_races)
+                    normalized_source["result"][str(race_number)] = cleaned_rows
                     audit = parse_public_winodds(
-                        raw_winodds[-1], meeting_id=match.group(1),
+                        normalized_source, meeting_id=match.group(1),
                         race_number=race_number, captured_utc=report["captured_utc"],
                         expected_runners=expected, scratches_verified=True)
-                    report["startlist_scratch_numbers"] = [h["startNumber"] for h in start_rows if h["isScratched"]]
+                    report["startlist_scratch_numbers"] = sorted(scratched)
+                    report["excluded_verified_scratch_quotes"] = len(original_rows) - len(cleaned_rows)
                     report["win_startlist_audit"] = {
                         "status": audit["status"], "errors": audit["errors"],
                         "runner_count": len(expected),
