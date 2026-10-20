@@ -104,7 +104,7 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
             if response is None or response.status != 200:
                 report["reason"] = "PAGE_HTTP_NOT_200"
                 return report
-            await page.wait_for_timeout(2000)
+            await page.wait_for_timeout(5000)
             body = await page.locator("body").inner_text(timeout=timeout_ms)
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
