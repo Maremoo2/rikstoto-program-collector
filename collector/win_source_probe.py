@@ -112,7 +112,7 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
             # Read-only diagnostic: actual WIN values with exact startlist join.
             # Do not claim screen agreement or live trading authorization.
             match = re.search(r"/Spill/([^/]+)/", url, re.I)
-            race_match = re.search(r"(?:^|[?&])race=(\\d+)", url)
+            race_match = re.search(r"(?:^|[?&])race=(\d+)", url)
             # The odds page need not request starts itself. Query the observed
             # official first-party starts endpoint only when robots permits it.
             if match and raw_winodds and not raw_startlists:
