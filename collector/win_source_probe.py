@@ -13,6 +13,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
+from .winodds_adapter import parse_public_winodds
+
 CANDIDATE_PATH = re.compile(r"odds|vinner|winner|price|pool|market|betting", re.I)
 SENSITIVE_KEY = re.compile(r"token|auth|session|cookie|email|password|secret|account|person", re.I)
 
@@ -62,6 +64,8 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
             page = await context.new_page()
             observed = []
             candidate_responses = []
+            raw_winodds = []
+            raw_startlists = []
             async def inspect_candidate(response):
                 u = urlparse(response.url)
                 if (u.scheme != "https" or u.hostname != DOMAIN or
@@ -75,6 +79,10 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                         entry["reason"] = "NOT_JSON"
                     else:
                         payload = await response.json()
+                        if u.path.endswith("/betdistribution/winodds"):
+                            raw_winodds.append(payload)
+                        if u.path.endswith("/starts") and "/api/racedays/" in u.path:
+                            raw_startlists.append(payload)
                         entry["schema_outline"] = schema_outline(payload, max_depth=7 if "/winodds" in u.path.lower() else 3)
                 except Exception as exc:
                     entry["reason"] = f"UNREADABLE:{type(exc).__name__}"
@@ -86,7 +94,7 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                         and len(observed) < 80):
                     observed.append({"path": u.path, "status": response.status,
                                      "resource_type": response.request.resource_type})
-                    if CANDIDATE_PATH.search(u.path):
+                    if CANDIDATE_PATH.search(u.path) or (u.path.endswith("/starts") and "/api/racedays/" in u.path):
                         tasks.append(asyncio.create_task(inspect_candidate(response)))
             tasks = []
             page.on("response", capture_response)
@@ -100,6 +108,38 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
             report["candidate_response_schemas"] = candidate_responses
+            # Read-only diagnostic: actual WIN values with exact startlist join.
+            # Do not claim screen agreement or live trading authorization.
+            match = re.search(r"/Spill/([^/]+)/", url, re.I)
+            race_match = re.search(r"(?:^|[?&])race=(\\d+)", url)
+            if match and race_match and raw_winodds and raw_startlists:
+                race_number = int(race_match.group(1))
+                start_rows = raw_startlists[-1].get("result", {}).get(str(race_number))
+                if isinstance(start_rows, list) and start_rows and all(
+                    isinstance(h, dict) and type(h.get("isScratched")) is bool
+                    and type(h.get("startNumber")) is int
+                    and isinstance(h.get("horseName"), str) for h in start_rows
+                ):
+                    expected = {h["startNumber"]: h["horseName"]
+                                for h in start_rows if not h["isScratched"]}
+                    audit = parse_public_winodds(
+                        raw_winodds[-1], meeting_id=match.group(1),
+                        race_number=race_number, captured_utc=report["captured_utc"],
+                        expected_runners=expected, scratches_verified=True)
+                    report["win_startlist_audit"] = {
+                        "status": audit["status"], "errors": audit["errors"],
+                        "runner_count": len(expected),
+                        "api_odds": [{"number": row["number"], "odds": row["win_odds"]}
+                                     for row in audit.get("snapshot", {}).get("runners", [])],
+                        "market_last_updated": audit.get("market_last_updated", []),
+                        "screen_comparison": "NOT_VERIFIED",
+                        "bet_authorized": False}
+                else:
+                    report["win_startlist_audit"] = {"status": "BLOCKED",
+                        "reason": "STARTLIST_FLAGS_OR_IDENTITIES_UNVERIFIED"}
+            else:
+                report["win_startlist_audit"] = {"status": "BLOCKED",
+                    "reason": "WIN_AND_OFFICIAL_STARTLIST_NOT_BOTH_CAPTURED"}
             report["observed_public_requests"] = observed
             report["body_mentions_win"] = "vinner" in body.casefold()
             report["body_mentions_odds"] = "odds" in body.casefold()
