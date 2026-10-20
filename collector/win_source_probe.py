@@ -109,6 +109,8 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
             report["candidate_response_schemas"] = candidate_responses
+            report["screen_text_excerpt"] = body[:1200]
+            report["screen_comparison_method"] = "NOT_IMPLEMENTED"
             # Read-only diagnostic: actual WIN values with exact startlist join.
             # Do not claim screen agreement or live trading authorization.
             match = re.search(r"/Spill/([^/]+)/", url, re.I)
