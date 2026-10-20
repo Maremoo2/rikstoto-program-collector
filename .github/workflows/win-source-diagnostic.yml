@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     env:
-      RACE_URL: ${{ inputs.race_url || 'https://www.rikstoto.no/Spill/S2_NR_2026-10-19/V?race=9&p=9:0' }}
+      RACE_URL: ${{ inputs.race_url || 'https://www.rikstoto.no/Spill/S2_NR_2026-10-20/V?race=1&p=1:0' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -36,7 +36,7 @@ jobs:
           python -m pip install -r requirements-dev.txt
           python -m playwright install --with-deps chromium
       - name: Validate source probe tests
-        run: python -m pytest -q tests/test_win_source_probe.py tests/test_odds_snapshot.py
+        run: python -m pytest -q tests/test_win_source_probe.py tests/test_odds_snapshot.py tests/test_winodds_adapter.py
       - name: Probe observed public race requests
         run: |
           python -m collector.win_source_probe --url "$RACE_URL" --output output/win_source_probe.json
