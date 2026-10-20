@@ -1,0 +1,83 @@
+name: A-WATCH selective WIN diagnostic (manual, read-only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      prewatch_json:
+        description: "Scored Pre-Watch JSON with meetings/races; manually verified input only"
+        required: true
+        type: string
+      lookahead_minutes:
+        description: "Upcoming target window in minutes (0-60)"
+        required: false
+        default: "10"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: awatch-selective-win
+  cancel-in-progress: false
+
+jobs:
+  selective-win:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PREWATCH_JSON: ${{ inputs.prewatch_json }}
+      LOOKAHEAD_MINUTES: ${{ inputs.lookahead_minutes }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate submitted input structure
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          data = json.loads(os.environ["PREWATCH_JSON"])
+          if not isinstance(data, dict) or not isinstance(data.get("meetings"), list):
+              raise SystemExit("BLOCKED: meetings array required")
+          for meeting in data["meetings"]:
+              if not isinstance(meeting, dict) or not isinstance(meeting.get("races"), list):
+                  raise SystemExit("BLOCKED: invalid meeting/races")
+          Path("output").mkdir(exist_ok=True)
+          Path("output/scored_prewatch.json").write_text(json.dumps(data), encoding="utf-8")
+          PY
+      - name: Install dependencies and Chromium
+        run: |
+          python -m pip install -r requirements-dev.txt
+          python -m playwright install --with-deps chromium
+      - name: Test selective gate and no-request behavior
+        run: python -m pytest -q tests/test_awatch_market_schedule.py
+      - name: Probe only due qualified A-WATCH race pages
+        run: |
+          python -m collector.awatch_win_collector \
+            --input output/scored_prewatch.json \
+            --output output/awatch_win_diagnostic.json \
+            --lookahead-minutes "$LOOKAHEAD_MINUTES"
+      - name: Summarize without BET authorization
+        if: always()
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path("output/awatch_win_diagnostic.json")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write("## A-WATCH Phase B selective diagnostic\n\n")
+              if not path.exists():
+                  f.write("BLOCKED: no diagnostic output.\n")
+              else:
+                  data = json.loads(path.read_text())
+                  f.write(f"Qualified due races probed: {data['probed_race_count']}\n\n")
+                  f.write("BET authorization: **NO**. Manual input is not independent Pre-Watch proof.\n")
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: awatch-selective-win-diagnostic
+          path: output/awatch_win_diagnostic.json
+          if-no-files-found: warn
+          retention-days: 7
