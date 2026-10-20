@@ -179,21 +179,38 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                         if found:
                             n = int(found.group(1))
                             screen_rows[n] = (found.group(2).strip(), float(found.group(3).replace(",", ".")))
+                    # Fail closed: every active API quote must have a matching
+                    # rendered quote. Empty/partial snapshots cannot establish parity.
                     active_quotes = audit.get("snapshot", {}).get("runners", [])
+                    quote_numbers = [row.get("number") for row in active_quotes]
+                    complete_api = (len(active_quotes) == len(expected)
+                                    and len(set(quote_numbers)) == len(expected)
+                                    and set(quote_numbers) == set(expected))
                     mismatches = []
-                    for row in active_quotes:
-                        shown = screen_rows.get(row["number"])
-                        if shown is None or shown[0].casefold() != row["name"].casefold() or abs(shown[1] - row["win_odds"]) > 0.011:
-                            mismatches.append(row["number"])
-                    parity = (len(screen_rows) >= len(expected)
-                              and set(expected).issubset(screen_rows)
+                    for number, name in expected.items():
+                        matching = [row for row in active_quotes if row.get("number") == number]
+                        shown = screen_rows.get(number)
+                        if len(matching) != 1 or shown is None:
+                            mismatches.append(number)
+                            continue
+                        row = matching[0]
+                        odds = row.get("win_odds")
+                        if (shown[0].casefold() != name.casefold()
+                                or row.get("name", "").casefold() != name.casefold()
+                                or type(odds) not in (int, float)
+                                or not (1 < odds < float("inf"))
+                                or abs(shown[1] - odds) > 0.011):
+                            mismatches.append(number)
+                    parity = (complete_api
+                              and set(screen_rows) == set(expected)
                               and not mismatches)
                     report["screen_parity"] = {
                         "status": "MATCH" if parity else "NOT_VERIFIED",
                         "matched_count": len(expected) - len(mismatches),
                         "expected_count": len(expected),
                         "mismatched_or_missing_numbers": mismatches,
-                        "screen_rows_observed": len(screen_rows)}
+                        "screen_rows_observed": len(screen_rows),
+                        "api_field_complete": complete_api}
                     report["win_startlist_audit"] = {
                         "status": audit["status"], "errors": audit["errors"],
                         "runner_count": len(expected),
