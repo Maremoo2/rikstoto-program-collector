@@ -130,6 +130,7 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                 chosen = raw_winodds[-1].get("result", {}).get(race_match.group(1), [])
                 report["win_row_quality"] = {
                     "rows": len(chosen),
+                    "timestamp_samples": [str(row.get("lastUpdated", ""))[:80] for row in chosen[:3] if isinstance(row, dict)],
                     "missing_or_invalid_timestamps": sum(
                         not isinstance(row.get("lastUpdated"), str) or not row.get("lastUpdated")
                         for row in chosen if isinstance(row, dict)),
