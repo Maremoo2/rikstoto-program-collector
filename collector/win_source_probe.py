@@ -123,6 +123,8 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                             raw_startlists.append(await starts_response.json())
                     except Exception:
                         pass
+            report["source_capture_counts"] = {
+                "winodds": len(raw_winodds), "official_starts": len(raw_startlists)}
             if match and race_match and raw_winodds and raw_startlists:
                 race_number = int(race_match.group(1))
                 start_rows = raw_startlists[-1].get("result", {}).get(str(race_number))
@@ -152,6 +154,9 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                 report["win_startlist_audit"] = {"status": "BLOCKED",
                     "reason": "WIN_AND_OFFICIAL_STARTLIST_NOT_BOTH_CAPTURED"}
             report["observed_public_requests"] = observed
+            report["requested_race_number"] = int(race_match.group(1)) if race_match else None
+            report["available_win_races"] = sorted(raw_winodds[-1].get("result", {}).keys()) if raw_winodds and isinstance(raw_winodds[-1].get("result"), dict) else []
+            report["available_startlist_races"] = sorted(raw_startlists[-1].get("result", {}).keys()) if raw_startlists and isinstance(raw_startlists[-1].get("result"), dict) else []
             report["body_mentions_win"] = "vinner" in body.casefold()
             report["body_mentions_odds"] = "odds" in body.casefold()
             report["status"] = "DIAGNOSTIC_CAPTURED"
