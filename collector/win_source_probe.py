@@ -69,7 +69,8 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
             async def inspect_candidate(response):
                 u = urlparse(response.url)
                 if (u.scheme != "https" or u.hostname != DOMAIN or
-                        response.status != 200 or not CANDIDATE_PATH.search(u.path) or
+                        response.status != 200 or not (CANDIDATE_PATH.search(u.path) or
+                             (u.path.endswith("/starts") and "/api/racedays/" in u.path)) or
                         len(candidate_responses) >= 12):
                     return
                 entry = {"path": u.path, "http_status": response.status}
