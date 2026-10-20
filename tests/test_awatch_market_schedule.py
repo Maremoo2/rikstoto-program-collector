@@ -111,3 +111,23 @@ def test_end_to_end_phase_b_selection_mixed_races():
     assert output["races"][0]["diagnostic"]["status"] == "BLOCKED"
     assert output["bet_authorized"] is False
     assert output["automated_betting"] is False
+
+
+def test_phase_b_rejects_untrusted_meeting_identifier():
+    from collector.awatch_win_collector import eligible_race_urls
+    _, urls = eligible_race_urls([{"meeting_id": "../bad",
+                                  "races": [race(1, 80)]}], now=NOW)
+    assert urls == {}
+
+
+def test_phase_b_probe_exception_fails_closed():
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+    from collector.awatch_win_collector import collect
+    with patch("collector.awatch_win_collector.probe",
+               new_callable=AsyncMock) as fake:
+        fake.side_effect = RuntimeError("network unavailable")
+        result = asyncio.run(collect([{"meeting_id": "S2_NR_2026-10-20",
+            "races": [race(1, 80)]}], now=NOW))
+    assert result["races"][0]["diagnostic"]["status"] == "BLOCKED"
+    assert result["bet_authorized"] is False
