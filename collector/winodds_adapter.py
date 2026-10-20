@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 from math import isfinite
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from .odds_snapshot import SCHEMA, validate_win_snapshot
 
@@ -17,7 +18,8 @@ def parse_public_winodds(response: dict[str, Any], *, meeting_id: str,
                          race_number: int, captured_utc: str,
                          expected_runners: dict[int, str],
                          scratches_verified: bool = False,
-                         max_market_age_seconds: int = 180) -> dict[str, Any]:
+                         max_market_age_seconds: int = 180,
+                         source_timezone: str | None = None) -> dict[str, Any]:
     """Return fail-closed audit envelope; do not infer LIVE or BET status."""
     errors: list[str] = []
     if not isinstance(response, dict) or response.get("success") is not True:
@@ -56,7 +58,11 @@ def parse_public_winodds(response: dict[str, Any], *, meeting_id: str,
         try:
             dt = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
             if dt.tzinfo is None:
-                raise ValueError("naive timestamp")
+                # Require an explicit timezone; never silently assume UTC.
+                if source_timezone is None:
+                    raise ValueError("naive timestamp without source timezone")
+                dt = dt.replace(tzinfo=ZoneInfo(source_timezone))
+            dt = dt.astimezone(timezone.utc)
             market_times.append(dt.isoformat())
             parsed_market_times.append(dt)
             if capture_dt is not None:
@@ -65,7 +71,7 @@ def parse_public_winodds(response: dict[str, Any], *, meeting_id: str,
                     errors.append("MARKET_TIMESTAMP_IN_FUTURE")
                 elif age > max_market_age_seconds:
                     errors.append("STALE_MARKET_ODDS")
-        except (ValueError, TypeError, AttributeError):
+        except (ValueError, TypeError, AttributeError, KeyError):
             errors.append("INVALID_MARKET_TIMESTAMP")
         if number not in expected_runners:
             errors.append("UNKNOWN_OR_SCRATCHED_RUNNER")
