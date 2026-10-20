@@ -28,3 +28,39 @@ def test_boolean_score_does_not_qualify():
     out = plan_awatch_market_checks([{"meeting_id": "MEET",
         "races": [race(1, True)]}], now=NOW)
     assert out["events"] == []
+
+
+def test_win_collector_selects_only_qualified_and_no_request_for_rejected():
+    from collector.awatch_win_collector import eligible_race_urls
+    meetings = [{"meeting_id": "S2_NR_2026-10-20",
+                 "races": [race(1, 70), race(2, 69), race(3, 90, False),
+                           race(4, 90, True, "WATCH")]}]
+    plan, urls = eligible_race_urls(meetings, now=NOW)
+    assert list(urls) == [("S2_NR_2026-10-20", 1)]
+    assert plan["bet_authorized"] is False
+
+
+def test_win_collector_never_probes_without_awatch():
+    import asyncio
+    from unittest.mock import patch
+    from collector.awatch_win_collector import collect
+    with patch("collector.awatch_win_collector.probe") as fake:
+        result = asyncio.run(collect([{"meeting_id": "M",
+            "races": [race(1, 69)]}], now=NOW))
+        fake.assert_not_called()
+    assert result["probed_race_count"] == 0
+    assert result["bet_authorized"] is False
+
+
+def test_win_collector_qualified_probes_but_never_authorizes():
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+    from collector.awatch_win_collector import collect
+    with patch("collector.awatch_win_collector.probe",
+               new_callable=AsyncMock) as fake:
+        fake.return_value = {"status": "DIAGNOSTIC_CAPTURED", "bet_authorized": False}
+        result = asyncio.run(collect([{"meeting_id": "S2_NR_2026-10-20",
+            "races": [race(7, 75)]}], now=NOW))
+        fake.assert_awaited_once()
+    assert result["probed_race_count"] == 1
+    assert result["bet_authorized"] is False
