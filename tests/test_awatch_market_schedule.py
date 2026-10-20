@@ -64,3 +64,29 @@ def test_win_collector_qualified_probes_but_never_authorizes():
         fake.assert_awaited_once()
     assert result["probed_race_count"] == 1
     assert result["bet_authorized"] is False
+
+
+def test_win_collector_missing_score_never_probes():
+    import asyncio
+    from unittest.mock import patch
+    from collector.awatch_win_collector import collect
+    with patch("collector.awatch_win_collector.probe") as fake:
+        result = asyncio.run(collect([{"meeting_id": "M",
+            "races": [{"race_number": 1, "start_utc": START,
+                       "prewatch_status": "A-WATCH",
+                       "prewatch_gates_passed": True}]}], now=NOW))
+        fake.assert_not_called()
+    assert result["probed_race_count"] == 0
+
+
+def test_win_collector_past_race_never_probes():
+    import asyncio
+    from unittest.mock import patch
+    from collector.awatch_win_collector import collect
+    old = race(1, 90)
+    old["start_utc"] = (NOW - timedelta(minutes=20)).isoformat()
+    with patch("collector.awatch_win_collector.probe") as fake:
+        result = asyncio.run(collect([{"meeting_id": "M",
+            "races": [old]}], now=NOW))
+        fake.assert_not_called()
+    assert result["probed_race_count"] == 0
