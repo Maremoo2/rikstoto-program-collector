@@ -172,12 +172,15 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                     # rows by horse number, name and decimal WIN price.
                     # Never accept an excerpt or partial field as full parity.
                     screen_rows = {}
+                    duplicate_screen_numbers = set()
                     for line in body.splitlines():
                         found = re.search(
                             r"Nr\s+(\d+)\s+Hest\s+(.+?)\s+Kusk\s+.+?\s+Vinner\s+([\d.,]+)\s+Plass",
                             line, re.I)
                         if found:
                             n = int(found.group(1))
+                            if n in screen_rows:
+                                duplicate_screen_numbers.add(n)
                             screen_rows[n] = (found.group(2).strip(), float(found.group(3).replace(",", ".")))
                     # Fail closed: every active API quote must have a matching
                     # rendered quote. Empty/partial snapshots cannot establish parity.
@@ -202,6 +205,7 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                                 or abs(shown[1] - odds) > 0.011):
                             mismatches.append(number)
                     parity = (complete_api
+                              and not duplicate_screen_numbers
                               and set(screen_rows) == set(expected)
                               and not mismatches)
                     report["screen_parity"] = {
