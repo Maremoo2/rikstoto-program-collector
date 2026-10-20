@@ -168,6 +168,33 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                         source_timezone="Europe/Oslo")
                     report["startlist_scratch_numbers"] = sorted(scratched)
                     report["excluded_verified_scratch_quotes"] = len(original_rows) - len(cleaned_rows)
+                    # Independent rendered-page parity: compare visible race table
+                    # rows by horse number, name and decimal WIN price.
+                    # Never accept an excerpt or partial field as full parity.
+                    screen_rows = {}
+                    for line in body.splitlines():
+                        found = re.search(
+                            r"Nr\s+(\d+)\s+Hest\s+(.+?)\s+Kusk\s+.+?\s+Vinner\s+([\d.,]+)\s+Plass",
+                            line, re.I)
+                        if found:
+                            n = int(found.group(1))
+                            screen_rows[n] = (found.group(2).strip(), float(found.group(3).replace(",", ".")))
+                    active_quotes = audit.get("snapshot", {}).get("runners", [])
+                    mismatches = []
+                    for row in active_quotes:
+                        shown = screen_rows.get(row["number"])
+                        if shown is None or shown[0].casefold() != row["name"].casefold() or abs(shown[1] - row["win_odds"]) > 0.011:
+                            mismatches.append(row["number"])
+                    parity = (audit["status"] == "STRUCTURE_VALID_UNVERIFIED"
+                              and len(screen_rows) >= len(expected)
+                              and set(expected).issubset(screen_rows)
+                              and not mismatches)
+                    report["screen_parity"] = {
+                        "status": "MATCH" if parity else "NOT_VERIFIED",
+                        "matched_count": len(expected) - len(mismatches) if parity else 0,
+                        "expected_count": len(expected),
+                        "mismatched_or_missing_numbers": mismatches,
+                        "screen_rows_observed": len(screen_rows)}
                     report["win_startlist_audit"] = {
                         "status": audit["status"], "errors": audit["errors"],
                         "runner_count": len(expected),
@@ -175,7 +202,7 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                                      for row in audit.get("snapshot", {}).get("runners", [])],
                         "market_last_updated": audit.get("market_last_updated", []),
                         "source_timezone_assumption": "Europe/Oslo (unverified; no BET authorization)",
-                        "screen_comparison": "NOT_VERIFIED",
+                        "screen_comparison": report["screen_parity"]["status"],
                         "bet_authorized": False}
                 else:
                     report["win_startlist_audit"] = {"status": "BLOCKED",
