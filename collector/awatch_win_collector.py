@@ -5,6 +5,7 @@ import asyncio
 import json
 from datetime import datetime, timezone
 from pathlib import Path
+import re
 from urllib.parse import quote
 from .market_schedule import plan_awatch_market_checks
 from .win_source_probe import probe
@@ -13,19 +14,19 @@ from .win_source_probe import probe
 def eligible_race_urls(meetings, *, now, lookahead_minutes=10):
     schedule = plan_awatch_market_checks(meetings, now=now,
                                         lookahead_minutes=lookahead_minutes)
-    allowed = {(m["meeting_id"], r["race_number"]) for m in meetings
-               for r in m.get("races", [])
-               if r.get("prewatch_status") == "A-WATCH"
-               and type(r.get("prewatch_score")) in (int, float)
-               and 70 <= r["prewatch_score"] <= 100
-               and r.get("prewatch_gates_passed") is True}
+    # Use the planner as the single source of qualification truth.
+    # Do not independently reinterpret scores or create divergent gates.
+    allowed = {(e["meeting_id"], e["race_number"])
+               for e in schedule["events"] if e["race_number"] is not None}
     candidates = {}
     for event in schedule["events"]:
         key = (event["meeting_id"], event["race_number"])
         if key not in allowed:
             continue
         meeting_id, race = key
-        if not isinstance(meeting_id, str) or not meeting_id:
+        if (not isinstance(meeting_id, str)
+                or not re.fullmatch(r"[A-Z0-9_]{3,80}", meeting_id)
+                or type(race) is not int or race < 1 or race > 99):
             continue
         # First-party public page only. Probe separately enforces robots.
         url = ("https://www.rikstoto.no/Spill/"
@@ -40,7 +41,11 @@ async def collect(meetings, *, now, lookahead_minutes=10):
                                               lookahead_minutes=lookahead_minutes)
     results = []
     for (meeting_id, race_number), url in sorted(candidates.items()):
-        result = await probe(url)
+        try:
+            result = await probe(url)
+        except Exception as exc:
+            result = {"status": "BLOCKED", "reason": "PROBE_EXCEPTION:" + type(exc).__name__,
+                      "bet_authorized": False}
         results.append({"meeting_id": meeting_id, "race_number": race_number,
                         "url": url, "diagnostic": result,
                         "bet_authorized": False})
