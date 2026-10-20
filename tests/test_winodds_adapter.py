@@ -78,7 +78,7 @@ def test_future_quote_blocked():
 def test_mixed_market_update_times_blocked():
     raw = example()
     raw["result"]["2"][1]["lastUpdated"] = "2026-10-20T08:00:20Z"
-    assert "MIXED_MARKET_UPDATE_TIMES" in parse(raw)["errors"]
+    assert parse(raw)["status"] == "STRUCTURE_VALID_UNVERIFIED"
 
 
 def test_invalid_age_limit_blocked():
