@@ -59,3 +59,27 @@ def test_duplicate_blocked():
     raw = example()
     raw["result"]["2"].append(dict(raw["result"]["2"][0]))
     assert "INVALID_OR_DUPLICATE_NUMBER" in parse(raw)["errors"]
+
+
+def test_stale_quote_blocked():
+    assert "STALE_MARKET_ODDS" in parse(captured_utc="2026-10-20T08:10:00Z")["errors"]
+
+
+def test_recent_quote_structurally_valid():
+    assert parse(captured_utc="2026-10-20T08:01:00Z")["status"] == "STRUCTURE_VALID_UNVERIFIED"
+
+
+def test_future_quote_blocked():
+    raw = example()
+    raw["result"]["2"][0]["lastUpdated"] = "2026-10-20T08:02:00Z"
+    assert "MARKET_TIMESTAMP_IN_FUTURE" in parse(raw)["errors"]
+
+
+def test_mixed_market_update_times_blocked():
+    raw = example()
+    raw["result"]["2"][1]["lastUpdated"] = "2026-10-20T08:00:20Z"
+    assert "MIXED_MARKET_UPDATE_TIMES" in parse(raw)["errors"]
+
+
+def test_invalid_age_limit_blocked():
+    assert "INVALID_MAX_MARKET_AGE" in parse(max_market_age_seconds=0)["errors"]
