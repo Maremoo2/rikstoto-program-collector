@@ -185,13 +185,12 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                         shown = screen_rows.get(row["number"])
                         if shown is None or shown[0].casefold() != row["name"].casefold() or abs(shown[1] - row["win_odds"]) > 0.011:
                             mismatches.append(row["number"])
-                    parity = (audit["status"] == "STRUCTURE_VALID_UNVERIFIED"
-                              and len(screen_rows) >= len(expected)
+                    parity = (len(screen_rows) >= len(expected)
                               and set(expected).issubset(screen_rows)
                               and not mismatches)
                     report["screen_parity"] = {
                         "status": "MATCH" if parity else "NOT_VERIFIED",
-                        "matched_count": len(expected) - len(mismatches) if parity else 0,
+                        "matched_count": len(expected) - len(mismatches),
                         "expected_count": len(expected),
                         "mismatched_or_missing_numbers": mismatches,
                         "screen_rows_observed": len(screen_rows)}
@@ -217,7 +216,8 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
             report["body_mentions_win"] = "vinner" in body.casefold()
             report["body_mentions_odds"] = "odds" in body.casefold()
             report["status"] = "DIAGNOSTIC_CAPTURED"
-            report["reason"] = "WIN_AUDIT_" + report["win_startlist_audit"]["status"] + ";SCREEN_NOT_VERIFIED"
+            report["reason"] = ("WIN_AUDIT_" + report["win_startlist_audit"]["status"]
+                                + ";SCREEN_" + report.get("screen_parity", {}).get("status", "NOT_VERIFIED"))
             return report
         except Exception as exc:
             report["reason"] = f"PROBE_ERROR:{type(exc).__name__}"
