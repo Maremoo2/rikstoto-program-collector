@@ -17,7 +17,7 @@ def _valid_meeting_id(meeting_id):
         return False
     if re.fullmatch(r"[A-Z0-9_]{3,80}", meeting_id):
         return True
-    dated = re.fullmatch(r"[A-Z0-9_]{3,69}_(\\d{4}-\\d{2}-\\d{2})", meeting_id)
+    dated = re.fullmatch(r"[A-Z0-9_]{3,69}_(\d{4}-\d{2}-\d{2})", meeting_id)
     if dated is None:
         return False
     try:
