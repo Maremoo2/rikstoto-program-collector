@@ -11,6 +11,22 @@ from .market_schedule import plan_awatch_market_checks
 from .win_source_probe import probe
 
 
+def _valid_meeting_id(meeting_id):
+    """Accept legacy IDs or an underscore-prefixed ISO calendar date, and nothing else."""
+    if not isinstance(meeting_id, str):
+        return False
+    if re.fullmatch(r"[A-Z0-9_]{3,80}", meeting_id):
+        return True
+    dated = re.fullmatch(r"[A-Z0-9_]{3,69}_(\\d{4}-\\d{2}-\\d{2})", meeting_id)
+    if dated is None:
+        return False
+    try:
+        datetime.fromisoformat(dated.group(1))
+    except ValueError:
+        return False
+    return True
+
+
 def eligible_race_urls(meetings, *, now, lookahead_minutes=10):
     schedule = plan_awatch_market_checks(meetings, now=now,
                                         lookahead_minutes=lookahead_minutes)
@@ -24,8 +40,7 @@ def eligible_race_urls(meetings, *, now, lookahead_minutes=10):
         if key not in allowed:
             continue
         meeting_id, race = key
-        if (not isinstance(meeting_id, str)
-                or not re.fullmatch(r"[A-Z0-9_]{3,80}", meeting_id)
+        if (not _valid_meeting_id(meeting_id)
                 or type(race) is not int or race < 1 or race > 99):
             continue
         # First-party public page only. Probe separately enforces robots.
