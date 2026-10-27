@@ -1,0 +1,88 @@
+{
+  "schema": "phase_b_offline_source_contract_fixture_v1",
+  "synthetic_fixture": true,
+  "fixture_notice": "FABRICATED RUNNERS/ODDS/POOL FOR SOFTWARE CONTRACT TEST ONLY; NO ACTUAL PRE-WATCH OR BET",
+  "now_utc": "2026-10-20T12:00:00Z",
+  "scheduled_start_utc": "2026-10-20T12:03:00Z",
+  "meeting_id": "S2_NR_2026-10-20",
+  "race_number": 2,
+  "prewatch": {
+    "race_number": 2,
+    "start_utc": "2026-10-20T12:03:00Z",
+    "prewatch_score": 70,
+    "prewatch_gates_passed": true,
+    "prewatch_status": "A-WATCH"
+  },
+  "official_startlist": {
+    "meeting_id": "S2_NR_2026-10-20",
+    "race_number": 2,
+    "captured_utc": "2026-10-20T11:59:30Z",
+    "scratch_flags_verified": true,
+    "runners": [
+      {
+        "number": 4,
+        "name": "Synthetic Alpha",
+        "is_scratched": false
+      },
+      {
+        "number": 7,
+        "name": "Synthetic Bravo",
+        "is_scratched": false
+      },
+      {
+        "number": 8,
+        "name": "Synthetic Charlie",
+        "is_scratched": true
+      }
+    ]
+  },
+  "win_odds": {
+    "meeting_id": "S2_NR_2026-10-20",
+    "race_number": 2,
+    "captured_utc": "2026-10-20T12:00:00Z",
+    "response": {
+      "success": true,
+      "result": {
+        "2": [
+          {
+            "startNumber": 4,
+            "odds": 3.5,
+            "lastUpdated": "2026-10-20T11:59:45Z"
+          },
+          {
+            "startNumber": 7,
+            "odds": 5.2,
+            "lastUpdated": "2026-10-20T11:59:45Z"
+          }
+        ]
+      }
+    }
+  },
+  "rendered_win_screen": {
+    "meeting_id": "S2_NR_2026-10-20",
+    "race_number": 2,
+    "captured_utc": "2026-10-20T12:00:00Z",
+    "runners": [
+      {
+        "number": 4,
+        "name": "Synthetic Alpha",
+        "win_odds": 3.5
+      },
+      {
+        "number": 7,
+        "name": "Synthetic Bravo",
+        "win_odds": 5.2
+      }
+    ]
+  },
+  "standalone_win_pool": {
+    "meeting_id": "S2_NR_2026-10-20",
+    "race_number": 2,
+    "market_type": "WIN",
+    "amount": 84000,
+    "currency": "NOK",
+    "asof_utc": "2026-10-20T11:59:45Z",
+    "captured_utc": "2026-10-20T12:00:00Z",
+    "source_note": "SYNTHETIC ONLY; NOT A RECORDED ACTUAL WIN POOL"
+  }
+}
