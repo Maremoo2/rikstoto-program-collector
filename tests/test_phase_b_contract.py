@@ -82,6 +82,19 @@ def test_phase_a_eligible_but_no_T_minus_3_due_event_is_not_ready(case):
     assert not report["technical_source_contract_passed_synthetic"]
 
 
+def test_qualified_but_unsafe_meeting_cannot_create_probe_url(case):
+    case["meeting_id"] = "../untrusted"
+    for key in ("official_startlist", "win_odds", "rendered_win_screen",
+                "standalone_win_pool"):
+        case[key]["meeting_id"] = "../untrusted"
+    report = audit_synthetic_phase_b_source(case)
+    assert report["phase_a_selected_in_synthetic_planner"] is True
+    assert report["t_minus_3_due_in_synthetic_planner"] is True
+    assert report["source_url_would_be_requested"] is None
+    assert "UNTRUSTED_OR_UNMAPPED_RACE_URL" in report["failed_contract_checks"]
+    assert report["bet_authorized"] is False
+
+
 def test_wrong_race_identity_is_not_accepted_as_same_market(case):
     case["win_odds"]["race_number"] = 3
     case["standalone_win_pool"]["race_number"] = 3
