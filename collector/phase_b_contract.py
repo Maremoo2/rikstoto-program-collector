@@ -17,6 +17,7 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from .awatch_win_collector import eligible_race_urls
 from .startlist_audit import normalized_horse_name
@@ -66,7 +67,7 @@ def _record_date_matches_id(meeting_id: str, start: datetime | None) -> bool:
     match = re.search(r"_(\d{4}-\d{2}-\d{2})\Z", meeting_id)
     if match is None:
         return True
-    return start is not None and start.date().isoformat() == match.group(1)
+    return (start is not None and start.astimezone(ZoneInfo("Europe/Oslo")).date().isoformat() == match.group(1))
 
 
 def audit_synthetic_phase_b_source(payload: dict[str, Any]) -> dict[str, Any]:
