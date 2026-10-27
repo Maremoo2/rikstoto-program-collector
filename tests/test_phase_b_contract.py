@@ -4,11 +4,13 @@ A passing example is *never* an actual BET, source validation or p(win).
 """
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 import subprocess
 import sys
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -245,3 +247,57 @@ def test_offline_cli_writes_only_new_diagnostic_file(tmp_path):
     assert result["full_phase_b_operationally_verified"] is False
     again = subprocess.run(command, capture_output=True, text=True, check=False)
     assert again.returncode != 0  # no silent overwrite of diagnostic evidence
+
+
+def test_actual_selective_collector_is_invoked_once_by_synthetic_A_WATCH(case):
+    """End-to-end through the existing public-source request planner, no HTTP."""
+    from datetime import datetime
+
+    from collector.awatch_win_collector import collect
+
+    with patch("collector.awatch_win_collector.probe",
+               new_callable=AsyncMock) as fake:
+        fake.return_value = {
+            "status": "DIAGNOSTIC_CAPTURED",
+            "win_market_verified": False,
+            "bet_authorized": False,
+            "win_startlist_audit": {
+                "status": "STRUCTURE_VALID_UNVERIFIED", "errors": [],
+            },
+            "screen_parity": {"status": "MATCH"},
+        }
+        result = asyncio.run(collect(
+            [{"meeting_id": case["meeting_id"], "races": [case["prewatch"]]}],
+            now=datetime.fromisoformat(case["now_utc"].replace("Z", "+00:00")),
+            lookahead_minutes=1,
+        ))
+        fake.assert_awaited_once()
+        assert fake.await_args.args[0].endswith("race=2&p=2:0")
+    assert result["schedule"]["selected_race_count"] == 1
+    assert result["probed_race_count"] == 1
+    assert result["races"][0]["diagnostic"]["win_market_verified"] is False
+    assert result["bet_authorized"] is False
+    assert result["automated_betting"] is False
+    synthetic = audit_synthetic_phase_b_source(case)
+    assert synthetic["technical_source_contract_passed_synthetic"] is True
+    assert synthetic["full_phase_b_operationally_verified"] is False
+    assert synthetic["BET_BLOCKED"] is True
+
+
+def test_existing_collector_never_probes_69_point_candidate(case):
+    from datetime import datetime
+
+    from collector.awatch_win_collector import collect
+
+    case["prewatch"]["prewatch_score"] = 69
+    with patch("collector.awatch_win_collector.probe",
+               new_callable=AsyncMock) as fake:
+        result = asyncio.run(collect(
+            [{"meeting_id": case["meeting_id"], "races": [case["prewatch"]]}],
+            now=datetime.fromisoformat(case["now_utc"].replace("Z", "+00:00")),
+            lookahead_minutes=1,
+        ))
+        fake.assert_not_called()
+    assert result["probed_race_count"] == 0
+    assert result["schedule"]["selected_race_count"] == 0
+    assert result["bet_authorized"] is False
