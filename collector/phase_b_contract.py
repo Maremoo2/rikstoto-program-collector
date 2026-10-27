@@ -113,10 +113,11 @@ def audit_synthetic_phase_b_source(payload: dict[str, Any]) -> dict[str, Any]:
                 [{"meeting_id": meeting_id, "races": [prewatch]}],
                 now=now, lookahead_minutes=1,
             )
-            phase_a_selected = (
-                schedule["selected_race_count"] == 1
-                and (meeting_id, number) in urls
-            )
+            # Qualification and dispatch timing are DIFFERENT gates:
+            # the planner reports selected A-WATCH races even when there is
+            # no event due in this clock window. The URL collector returns
+            # URLs only for due events. Never conflate these states.
+            phase_a_selected = schedule["selected_race_count"] == 1
             due_t_minus_3 = any(
                 event.get("race_number") == number
                 and event.get("check") == "RACE_T_MINUS_3"
@@ -127,6 +128,8 @@ def audit_synthetic_phase_b_source(payload: dict[str, Any]) -> dict[str, Any]:
         errors.add("NOT_QUALIFIED_FROZEN_A_WATCH")
     if phase_a_selected and not due_t_minus_3:
         errors.add("NO_DUE_T_MINUS_3_COLLECTION")
+    if phase_a_selected and due_t_minus_3 and planned_url is None:
+        errors.add("UNTRUSTED_OR_UNMAPPED_RACE_URL")
     # Even a perfectly simulated source cannot fix a missing official
     # frozen A-WATCH proof; this checks only the syntax/gate plan.
     official = payload.get("official_startlist")
