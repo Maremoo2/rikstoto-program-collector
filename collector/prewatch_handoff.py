@@ -11,6 +11,8 @@ import hashlib
 import json
 from pathlib import Path
 
+from .source_integrity import time_blocker
+
 MAX_BODY = 95_000
 HISTORY_LIMIT = 500
 SCHEMA = "prewatch_source_v1"
@@ -66,7 +68,7 @@ def compact(value, limit=160):
     return " ".join(str(value).split()).replace("|", "/")[:limit] or "UNKNOWN"
 
 
-def race_card(doc):
+def race_card(doc, *, source_status=None):
     race = doc["race"]
     qa = doc.get("qa", {})
     lines = [
@@ -82,6 +84,12 @@ def race_card(doc):
         f" | scratch_qa={qa.get('scratch_verification', 'UNVERIFIED')}",
         "QA_WARNINGS=" + json.dumps(qa.get("warnings", []), ensure_ascii=False),
     ]
+    # Consumers of draft Releases must see status for every individual race.
+    if source_status is not None:
+        lines.append(
+            "source_ready_snapshot=" + str(source_status["source_ready_snapshot"])
+            + " | source_blockers=" + json.dumps(source_status["source_blockers"])
+        )
     for horse in sorted(doc.get("entrants", []), key=lambda h: h.get("program_number") or 999):
         lines.append(
             f"#{horse.get('program_number')} {compact(horse.get('name'), 100)}"
@@ -146,8 +154,9 @@ def build_handoff(root: Path, dest: Path):
                 blockers.append(readiness["source_blocker"])
             if not runners:
                 blockers.append("NO_RUNNERS")
-            if not race.get("scheduled_time_local"):
-                blockers.append("START_TIME_UNKNOWN")
+            clock_blocker = time_blocker(race.get("scheduled_time_local"))
+            if clock_blocker:
+                blockers.append(clock_blocker)
             advisories, review_warnings = classify_race_warnings(
                 qa, meeting_audit=meeting.get("startlist_pdf_audit") or {})
             if review_warnings:
@@ -165,6 +174,11 @@ def build_handoff(root: Path, dest: Path):
                 "race_qa_review_warnings": review_warnings,
                 "source_release_tag_prefix": f"prewatch-src-{day}-{mid}-",
             })
+        meeting_queue = [r for r in index["race_queue"] if r["meeting_id"] == mid]
+        queue_by_number = {r["race_number"]: r for r in meeting_queue}
+        meeting_all_ready = all(r["source_ready_snapshot"] for r in meeting_queue)
+        meeting_blocker = (None if meeting_all_ready else
+                           readiness["source_blocker"] or "RACE_SOURCE_BLOCKERS_REVIEW")
         header = (
             "# PRE-WATCH DATA FEED (not a betting recommendation)\n\n"
             f"Schema={SCHEMA} | Date={day} Europe/Oslo | Run={run_id}\n"
@@ -173,15 +187,15 @@ def build_handoff(root: Path, dest: Path):
             f"Source ZIP tag={index['source_archive_tag']}"
             f" | PDF/Startlist audit={meeting.get('startlist_pdf_audit', {}).get('status', 'UNKNOWN')}\n"
             f"Collection status={m.get('status')} | Snapshot UTC={m.get('created_utc')}\n"
-            f"Source ready snapshot={readiness['source_ready_snapshot']}"
-            f" | Source blocker={readiness['source_blocker'] or 'NONE'}\n"
+            f"Source ready snapshot={meeting_all_ready}"
+            f" | Source blocker={meeting_blocker or 'NONE'}\n"
             "This is historical/static source evidence for shortlisting, NOT a fresh WIN market."
             " Recheck current scratches, equipment, start times and prices before action.\n"
             "Raw previous-start lines are limited excerpts and are NOT complete trip interpretation.\n\n"
         )
         chunks, current = [], header
         for doc in docs:
-            card = race_card(doc)
+            card = race_card(doc, source_status=queue_by_number[doc["race"]["race_number"]])
             if len(header) + len(card) > MAX_BODY:
                 raise ValueError(f"Race too large for release note: {mid}")
             if len(current) + len(card) > MAX_BODY and current != header:
@@ -195,6 +209,9 @@ def build_handoff(root: Path, dest: Path):
                 int(line.split(" | ", 1)[0].split()[-1])
                 for line in text.splitlines() if line.startswith("### Race ")
             ]
+            part_queue = [r for r in meeting_queue if r["race_number"] in race_numbers_in_part]
+            ready_in_part = sum(r["source_ready_snapshot"] is True for r in part_queue)
+            blocked_in_part = len(part_queue) - ready_in_part
             tag = f"prewatch-src-{day}-{mid}-p{number}-{run_id}"
             name = f"prewatch_{mid}_p{number}.md"
             (dest / name).write_text(text, encoding="utf-8")
@@ -207,14 +224,18 @@ def build_handoff(root: Path, dest: Path):
                 "race_numbers": race_numbers_in_part,
                 "body_length": len(text),
                 "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
-                **readiness,
+                "source_ready_snapshot": blocked_in_part == 0,
+                "source_blocker": None if blocked_in_part == 0 else (
+                    readiness["source_blocker"] or "RACE_SOURCE_BLOCKERS_REVIEW"),
+                "source_ready_race_count": ready_in_part,
+                "source_blocked_race_count": blocked_in_part,
+                "meeting_source_status": readiness["meeting_source_status"],
             })
-    index["source_ready_races"] = sum(item["race_count"] for item in index["meeting_feeds"]
-                                      if item["source_ready_snapshot"])
-    index["source_blocked_races"] = sum(item["race_count"] for item in index["meeting_feeds"]
-                                        if not item["source_ready_snapshot"])
-    index["queue_ready_races"] = sum(bool(r["source_ready_snapshot"]) for r in index["race_queue"])
+    # Aggregate only per-race decisions, not part-level flags (which can mix).
+    index["queue_ready_races"] = sum(r["source_ready_snapshot"] is True for r in index["race_queue"])
     index["queue_review_races"] = len(index["race_queue"]) - index["queue_ready_races"]
+    index["source_ready_races"] = index["queue_ready_races"]
+    index["source_blocked_races"] = index["queue_review_races"]
     index["meeting_count"] = len(meetings)
     index["race_count"] = sum(len(races.get(x["meeting_id"], [])) for x in meetings)
     index["runner_count"] = sum(len(doc.get("entrants", []))
