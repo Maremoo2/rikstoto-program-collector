@@ -56,6 +56,18 @@ The fixture is explicit; real-source input **is refused**. None of
 the code performs network requests, GitHub Action dispatch, Sheets
 writes, bets or probability estimation.
 
+### Existing Collector request path regression
+
+The tests additionally exercise the **existing**
+`collector.awatch_win_collector.collect()` end-to-end, with its public
+network probe replaced by an asynchronous in-memory stub. A qualified
+A-WATCH due at T-3 creates exactly one would-be source request; the
+otherwise-identical score-69 race creates **zero requests**. A mocked
+`DIAGNOSTIC_CAPTURED` response with perfect screen/API parity still
+retains `win_market_verified=false` and `bet_authorized=false`.
+This is a software integration test; it does not call Rikstoto or
+verify any recorded actual odds.
+
 ### A green synthetic report still means BLOCKED for real betting
 
 Even when `technical_source_contract_passed_synthetic=true`,
