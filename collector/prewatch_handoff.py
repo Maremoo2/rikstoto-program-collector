@@ -177,7 +177,8 @@ def build_handoff(root: Path, dest: Path):
         meeting_queue = [r for r in index["race_queue"] if r["meeting_id"] == mid]
         queue_by_number = {r["race_number"]: r for r in meeting_queue}
         meeting_all_ready = all(r["source_ready_snapshot"] for r in meeting_queue)
-        meeting_blocker = None if meeting_all_ready else "RACE_SOURCE_BLOCKERS_REVIEW"
+        meeting_blocker = (None if meeting_all_ready else
+                           readiness["source_blocker"] or "RACE_SOURCE_BLOCKERS_REVIEW")
         header = (
             "# PRE-WATCH DATA FEED (not a betting recommendation)\n\n"
             f"Schema={SCHEMA} | Date={day} Europe/Oslo | Run={run_id}\n"
@@ -224,7 +225,8 @@ def build_handoff(root: Path, dest: Path):
                 "body_length": len(text),
                 "sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
                 "source_ready_snapshot": blocked_in_part == 0,
-                "source_blocker": None if blocked_in_part == 0 else "RACE_SOURCE_BLOCKERS_REVIEW",
+                "source_blocker": None if blocked_in_part == 0 else (
+                    readiness["source_blocker"] or "RACE_SOURCE_BLOCKERS_REVIEW"),
                 "source_ready_race_count": ready_in_part,
                 "source_blocked_race_count": blocked_in_part,
                 "meeting_source_status": readiness["meeting_source_status"],
