@@ -8,6 +8,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -183,3 +184,40 @@ def test_private_archiver_is_never_a_betting_engine(private_root):
     assert receipt["source_authority_independently_verified"] is False
     assert receipt["raw_http_wire_bytes_verified"] is False
     assert receipt["immutable_or_signed_manifest_verified"] is False
+
+
+def test_random_record_id_collision_preserves_all_prior_archived_evidence(
+    private_root,
+):
+    archive = _archive(private_root)
+    fixed_id = "a" * 32
+    with patch(
+        "collector.private_source_archive.secrets.token_hex",
+        return_value=fixed_id,
+    ):
+        first = archive.write_body(WIN_BYTES, _evidence())
+        original_body = (private_root / (fixed_id + ".body")).read_bytes()
+        original_manifest = (private_root / (fixed_id + ".json")).read_bytes()
+        with pytest.raises(FileExistsError):
+            archive.write_body(STARTS_BYTES, _evidence(STARTS_BYTES, STARTS_URL))
+    assert first["record_id"] == fixed_id
+    assert (private_root / (fixed_id + ".body")).read_bytes() == original_body
+    assert (private_root / (fixed_id + ".json")).read_bytes() == original_manifest
+    assert verify_private_source_record(private_root, fixed_id) == first
+
+
+def test_existing_manifest_collision_never_erases_prior_file(private_root):
+    archive = _archive(private_root)
+    fixed_id = "b" * 32
+    path = private_root / (fixed_id + ".json")
+    old_manifest = b"do not overwrite existing evidence"
+    path.write_bytes(old_manifest)
+    path.chmod(0o600)
+    with patch(
+        "collector.private_source_archive.secrets.token_hex",
+        return_value=fixed_id,
+    ):
+        with pytest.raises(FileExistsError):
+            archive.write_body(WIN_BYTES, _evidence())
+    assert path.read_bytes() == old_manifest
+    assert not (private_root / (fixed_id + ".body")).exists()
