@@ -189,10 +189,16 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                 race_number = int(race_match.group(1))
                 start_rows = raw_startlists[-1].get("result", {}).get(str(race_number))
                 if isinstance(start_rows, list) and start_rows and all(
-                    isinstance(h, dict) and type(h.get("isScratched")) is bool
+                    isinstance(h, dict)
+                    and type(h.get("isScratched")) is bool
                     and type(h.get("startNumber")) is int
-                    and isinstance(h.get("horseName"), str) for h in start_rows
-                ):
+                    and h["startNumber"] > 0
+                    and isinstance(h.get("horseName"), str)
+                    and bool(h["horseName"].strip())
+                    for h in start_rows
+                ) and (
+                    len({h["startNumber"] for h in start_rows}) == len(start_rows)
+                ) and any(not h["isScratched"] for h in start_rows):
                     expected = {h["startNumber"]: h["horseName"]
                                 for h in start_rows if not h["isScratched"]}
                     # Exclude only officially scratched runners from the audit input.
