@@ -123,6 +123,7 @@ def decode_public_json_body(
 
 async def inspect_public_response_body(
     response: Any, *, observed_utc: datetime | None = None,
+    private_archive: Any | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Read one Playwright response body; set capture time AFTER receipt.
 
@@ -131,7 +132,17 @@ async def inspect_public_response_body(
     """
     body = await response.body()
     now = datetime.now(UTC) if observed_utc is None else observed_utc
-    return decode_public_json_body(
+    payload, evidence = decode_public_json_body(
         body=body, url=response.url, http_status=response.status,
         headers=response.headers, captured_utc=now.isoformat(),
     )
+    if private_archive is not None:
+        # Only previously validated, explicitly public bytes reach the
+        # private, owner-only archive. No raw bytes in returned diagnostics.
+        verified = private_archive.write_body(body, evidence)
+        evidence["body_bytes_archived_and_readback_verified"] = True
+        evidence["private_archive_record_id"] = verified["record_id"]
+        evidence["private_archive_manifest_sha256"] = verified["manifest_sha256"]
+        evidence["immutable_or_signed_manifest_verified"] = False
+        evidence["source_authority_independently_verified"] = False
+    return payload, evidence
