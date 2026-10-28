@@ -221,3 +221,17 @@ def test_hash_reproducible_and_original_results_not_mutated():
     assert first == second
     assert report == frozen
     assert len(first["diagnostic_envelope_sha256"]) == 64
+
+
+def test_mismatched_declared_probe_count_cannot_fake_a_workflow_result():
+    report, _ = asyncio.run(_run([_race()]))
+    report["probed_race_count"] = 0
+    with pytest.raises(ValueError, match="count contradicts"):
+        receipt_from_selective_collection(report)
+
+
+def test_schedule_cannot_self_authorize_source_phase_b():
+    report, _ = asyncio.run(_run([_race()]))
+    report["schedule"]["bet_authorized"] = True
+    with pytest.raises(ValueError, match="market-only and nonbetting"):
+        receipt_from_selective_collection(report)
