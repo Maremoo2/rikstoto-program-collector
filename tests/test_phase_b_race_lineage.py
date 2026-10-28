@@ -307,3 +307,82 @@ def test_readonly_cli_writes_new_report_and_refuses_overwrite(tmp_path, artifact
     again = subprocess.run(command, capture_output=True, text=True, check=False)
     assert again.returncode != 0
     assert json.loads(report_path.read_text(encoding="utf-8"))["BET_BLOCKED"] is True
+
+
+def test_a_watch_selected_but_not_due_is_not_a_phase_b_completion(artifacts):
+    p, index, _ = artifacts
+    with patch(
+        "collector.awatch_win_collector.probe",
+        new_callable=AsyncMock,
+    ) as stub:
+        no_due = asyncio.run(collect(
+            p["meetings"], now=NOW - timedelta(minutes=6),
+            lookahead_minutes=1,
+        ))
+        stub.assert_not_called()
+    report = audit_phase_b_race_lineage(
+        prewatch=p, source_index=index, collection=no_due,
+    )
+    assert report["status"] == "A_WATCH_SELECTED_BUT_NOT_DUE"
+    assert report["due_race_count"] == 0
+    assert report["real_betting_authorized"] is False
+
+
+def test_no_qualified_awatch_is_explicit_noop_and_not_a_bet(artifacts):
+    p, index, _ = artifacts
+    p["meetings"][0]["races"][0]["prewatch_score"] = 69
+    with patch(
+        "collector.awatch_win_collector.probe",
+        new_callable=AsyncMock,
+    ) as stub:
+        no_qualified = asyncio.run(collect(
+            p["meetings"], now=NOW, lookahead_minutes=1,
+        ))
+        stub.assert_not_called()
+    report = audit_phase_b_race_lineage(
+        prewatch=p, source_index=index, collection=no_qualified,
+    )
+    assert report["status"] == "NO_QUALIFIED_AWATCH"
+    assert report["manually_qualified_awatch_count"] == 0
+    assert report["due_races"] == []
+    assert report["BET_BLOCKED"] is True
+
+
+def test_undocumented_prestart_source_time_is_blocked(artifacts):
+    artifacts[1]["created_utc"] = (NOW + timedelta(minutes=1)).isoformat()
+    report = _report(artifacts)
+    assert report["status"] == "SOURCE_LINEAGE_BLOCKED"
+    assert "MORNING_SOURCE_NOT_AVAILABLE_BEFORE_PLAN" in (
+        report["due_races"][0]["diagnostic_reasons"]
+    )
+
+
+def test_manual_prewatch_freeze_after_collector_schedule_is_blocked(artifacts):
+    artifacts[0]["meetings"][0]["races"][0]["frozen_at_utc"] = (
+        NOW + timedelta(seconds=30)
+    ).isoformat()
+    report = _report(artifacts)
+    assert "PREWATCH_FREEZE_TIMESTAMP_AFTER_PLAN_OR_START" in (
+        report["due_races"][0]["diagnostic_reasons"]
+    )
+
+
+def test_exact_public_race_page_mismatch_is_not_reconciled(artifacts):
+    artifact = artifacts[2]
+    artifact["races"][0]["url"] = URL.replace("race=2", "race=3")
+    artifact["races"][0]["diagnostic"]["url"] = artifact["races"][0]["url"]
+    _recalculate(artifacts)
+    report = _report(artifacts)
+    assert report["status"] == "SOURCE_LINEAGE_BLOCKED"
+    assert "SOURCE_PAGE_URL_EXACT_RACE_MISMATCH" in (
+        report["due_races"][0]["diagnostic_reasons"]
+    )
+
+
+def test_no_morning_source_row_for_due_race_is_explicit_block(artifacts):
+    artifacts[1]["race_queue"] = []
+    report = _report(artifacts)
+    assert report["status"] == "SOURCE_LINEAGE_BLOCKED"
+    assert "EXACT_RACE_MISSING_FROM_MORNING_SOURCE" in (
+        report["due_races"][0]["diagnostic_reasons"]
+    )
