@@ -8,6 +8,7 @@ tamper-proof storage. Use only on explicitly permitted public sources.
 """
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
@@ -197,3 +198,17 @@ class PrivateSourceArchive:
                         pass
             raise
         return verified
+
+
+def main() -> None:
+    """Readback-only CLI; never reads a public race page or prints raw bytes."""
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--archive-root", type=Path, required=True)
+    parser.add_argument("--record-id", required=True)
+    args = parser.parse_args()
+    result = verify_private_source_record(args.archive_root, args.record_id)
+    print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+
+
+if __name__ == "__main__":
+    main()
