@@ -82,6 +82,17 @@ duplicate JSON keys (also nested), invalid JSON, wrong endpoint, wrong
 host, clock offset/naive timestamps, wrong HTTP response and body size,
 and a mocked async Playwright response read exactly once.
 
+A separate **offline browser-level test** mocks Playwright's response
+callbacks and executes the actual `win_source_probe.probe()` path.
+It verifies a browser started at 11:55 but a WIN body received at
+12:00 is judged by the **12:00 body timestamp** (not the navigation
+timestamp), that rendered WIN parity at 12:00:10 retains the stricter
+90-second bound, and that the exact WIN/startlist body hashes are
+reported. A duplicate horse number in the official startlist now
+fails closed instead of silently collapsing into a smaller dict,
+and malformed duplicate-key WIN JSON cannot qualify as a source
+observation. These examples are synthetic; no provider was contacted.
+
 These tests do **not** constitute a completed live Phase B. To reach
 real reproducible source provenance, the next separately authorized
 step must add a **private** original-byte archive with byte-level
