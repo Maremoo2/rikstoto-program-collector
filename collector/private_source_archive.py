@@ -49,7 +49,7 @@ def _private_root(root: Path) -> Path:
 
 
 def _read_private(root: Path, filename: str) -> bytes:
-    if filename not in {Path(filename).name}:
+    if filename != Path(filename).name:
         raise PrivateArchiveRejected("INVALID_ARCHIVE_FILENAME")
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
@@ -67,11 +67,19 @@ def _read_private(root: Path, filename: str) -> bytes:
 
 def _write_exclusive(root: Path, filename: str, body: bytes) -> None:
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    # An O_EXCL collision means the old file belongs to a DIFFERENT
+    # archived record. Never delete a file we did not create.
     fd = os.open(root / filename, flags, FILE_MODE)
-    with os.fdopen(fd, "wb") as stream:
-        stream.write(body)
-        stream.flush()
-        os.fsync(stream.fileno())
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(body)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except BaseException:
+        # This attempt successfully created the file, but failed while
+        # writing it. Its unfinished bytes must not be treated as an archive.
+        (root / filename).unlink(missing_ok=True)
+        raise
 
 
 def verify_private_source_record(root: Path, record_id: str) -> dict[str, Any]:
@@ -162,21 +170,30 @@ class PrivateSourceArchive:
             json.dumps(manifest, ensure_ascii=False, sort_keys=True,
                        separators=(",", ":")) + "\n"
         ).encode("utf-8")
+        body_created = False
+        manifest_created = False
         try:
             _write_exclusive(self.root, body_filename, body)
+            body_created = True
             # Independently reopen the original body bytes before manifest
             # publication; no reserialized JSON is used as a substitute.
             actual = _read_private(self.root, body_filename)
             if hashlib.sha256(actual).hexdigest() != digest or actual != body:
                 raise PrivateArchiveRejected("PRIVATE_BODY_READBACK_SHA256_MISMATCH")
             _write_exclusive(self.root, manifest_filename, encoded_manifest)
+            manifest_created = True
             verified = verify_private_source_record(self.root, record_id)
         except (OSError, PrivateArchiveRejected):
-            # No incomplete record can remain classified as verified.
-            for filename in (manifest_filename, body_filename):
-                try:
-                    (self.root / filename).unlink(missing_ok=True)
-                except OSError:
-                    pass
+            # Only unlink files this attempt created. Random-ID collisions
+            # must NEVER destroy existing archived evidence.
+            for created, filename in (
+                (manifest_created, manifest_filename),
+                (body_created, body_filename),
+            ):
+                if created:
+                    try:
+                        (self.root / filename).unlink(missing_ok=True)
+                    except OSError:
+                        pass
             raise
         return verified
