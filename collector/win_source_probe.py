@@ -14,6 +14,10 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from .winodds_adapter import parse_public_winodds
+from .win_response_provenance import (
+    SourceBodyRejected,
+    inspect_public_response_body,
+)
 
 CANDIDATE_PATH = re.compile(r"odds|vinner|winner|price|pool|market|betting", re.I)
 SENSITIVE_KEY = re.compile(r"token|auth|session|cookie|email|password|secret|account|person", re.I)
@@ -45,7 +49,9 @@ def validate_probe_url(url: str) -> bool:
 
 async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
     report = {"schema": "prewatch_win_source_probe_v1",
-              "url": url, "captured_utc": datetime.now(timezone.utc).isoformat(),
+              "url": url,
+              "probe_started_utc": datetime.now(timezone.utc).isoformat(),
+              "captured_utc": None,
               "status": "BLOCKED", "odds_captured": False,
               "win_market_verified": False, "bet_authorized": False,
               "observed_public_requests": []}
@@ -66,6 +72,8 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
             candidate_responses = []
             raw_winodds = []
             raw_startlists = []
+            raw_winodds_evidence = []
+            raw_startlists_evidence = []
             async def inspect_candidate(response):
                 u = urlparse(response.url)
                 if (u.scheme != "https" or u.hostname != DOMAIN or
@@ -79,12 +87,27 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                     if "json" not in content_type.lower():
                         entry["reason"] = "NOT_JSON"
                     else:
-                        payload = await response.json()
-                        if u.path.endswith("/betdistribution/winodds"):
-                            raw_winodds.append(payload)
-                        if u.path.endswith("/starts") and "/api/racedays/" in u.path:
-                            raw_startlists.append(payload)
-                        entry["schema_outline"] = schema_outline(payload, max_depth=7 if "/winodds" in u.path.lower() else 3)
+                        if (u.path == "/api/betdistribution/winodds"
+                                or (u.path.endswith("/starts")
+                                    and "/api/racedays/" in u.path)):
+                            payload, source_evidence = await inspect_public_response_body(
+                                response
+                            )
+                            entry["source_body_provenance"] = source_evidence
+                            if source_evidence["source_kind"] == "WIN_ODDS":
+                                raw_winodds.append(payload)
+                                raw_winodds_evidence.append(source_evidence)
+                            elif source_evidence["source_kind"] == "OFFICIAL_STARTLIST":
+                                raw_startlists.append(payload)
+                                raw_startlists_evidence.append(source_evidence)
+                            entry["schema_outline"] = schema_outline(
+                                payload, max_depth=7 if source_evidence["source_kind"] == "WIN_ODDS" else 3
+                            )
+                        else:
+                            # Other candidate endpoints are metadata only.
+                            entry["reason"] = "NOT_AN_APPROVED_WIN_OR_STARTLIST_ENDPOINT"
+                except SourceBodyRejected as exc:
+                    entry["reason"] = "PUBLIC_RESPONSE_BODY_REJECTED:" + str(exc)
                 except Exception as exc:
                     entry["reason"] = f"UNREADABLE:{type(exc).__name__}"
                 candidate_responses.append(entry)
@@ -106,6 +129,7 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                 return report
             await page.wait_for_timeout(5000)
             body = await page.locator("body").inner_text(timeout=timeout_ms)
+            report["screen_captured_utc"] = datetime.now(timezone.utc).isoformat()
             if tasks:
                 await asyncio.gather(*tasks, return_exceptions=True)
             report["candidate_response_schemas"] = candidate_responses
@@ -123,11 +147,32 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                     try:
                         starts_response = await context.request.get(starts_url, timeout=timeout_ms)
                         if starts_response.status == 200 and "json" in starts_response.headers.get("content-type", "").lower():
-                            raw_startlists.append(await starts_response.json())
-                    except Exception:
-                        pass
+                            payload, source_evidence = await inspect_public_response_body(
+                                starts_response
+                            )
+                            if source_evidence["source_kind"] == "OFFICIAL_STARTLIST":
+                                raw_startlists.append(payload)
+                                raw_startlists_evidence.append(source_evidence)
+                    except Exception as exc:
+                        report["startlist_fallback_source_error"] = type(exc).__name__
             report["source_capture_counts"] = {
                 "winodds": len(raw_winodds), "official_starts": len(raw_startlists)}
+            report["source_response_provenance"] = {
+                "winodds": raw_winodds_evidence,
+                "official_starts": raw_startlists_evidence,
+                "original_bodies_archived_and_readback_verified": False,
+                "independently_verified_live_win": False,
+                "bet_authorized": False,
+            }
+            report["source_response_provenance_status"] = (
+                "HASHED_BODIES_NOT_ARCHIVED_OR_INDEPENDENTLY_VERIFIED"
+                if raw_winodds_evidence and raw_startlists_evidence
+                else "INCOMPLETE_OR_MISSING_SOURCE_BODY_HASHES"
+            )
+            # Unlike the former pre-navigation timestamp, this clock belongs
+            # to the exact WIN body supplied to the current quote adapter.
+            if raw_winodds_evidence:
+                report["captured_utc"] = raw_winodds_evidence[-1]["captured_utc"]
             if raw_winodds and race_match:
                 chosen = raw_winodds[-1].get("result", {}).get(race_match.group(1), [])
                 report["win_row_quality"] = {
@@ -144,10 +189,16 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                 race_number = int(race_match.group(1))
                 start_rows = raw_startlists[-1].get("result", {}).get(str(race_number))
                 if isinstance(start_rows, list) and start_rows and all(
-                    isinstance(h, dict) and type(h.get("isScratched")) is bool
+                    isinstance(h, dict)
+                    and type(h.get("isScratched")) is bool
                     and type(h.get("startNumber")) is int
-                    and isinstance(h.get("horseName"), str) for h in start_rows
-                ):
+                    and h["startNumber"] > 0
+                    and isinstance(h.get("horseName"), str)
+                    and bool(h["horseName"].strip())
+                    for h in start_rows
+                ) and (
+                    len({h["startNumber"] for h in start_rows}) == len(start_rows)
+                ) and any(not h["isScratched"] for h in start_rows):
                     expected = {h["startNumber"]: h["horseName"]
                                 for h in start_rows if not h["isScratched"]}
                     # Exclude only officially scratched runners from the audit input.
@@ -163,7 +214,8 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                     normalized_source["result"][str(race_number)] = cleaned_rows
                     audit = parse_public_winodds(
                         normalized_source, meeting_id=match.group(1),
-                        race_number=race_number, captured_utc=report["captured_utc"],
+                        race_number=race_number,
+                        captured_utc=raw_winodds_evidence[-1]["captured_utc"],
                         expected_runners=expected, scratches_verified=True,
                         source_timezone="Europe/Oslo")
                     report["startlist_scratch_numbers"] = sorted(scratched)
@@ -204,17 +256,32 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                                 or not (1 < odds < float("inf"))
                                 or abs(shown[1] - odds) > 0.011):
                             mismatches.append(number)
+                    # A rendered table captured much later cannot corroborate
+                    # an earlier WIN response at an actionable prestart price.
+                    from datetime import datetime as _datetime
+                    market_time = _datetime.fromisoformat(
+                        raw_winodds_evidence[-1]["captured_utc"]
+                    )
+                    screen_time = _datetime.fromisoformat(
+                        report["screen_captured_utc"]
+                    )
+                    screen_api_separation_s = abs(
+                        (screen_time - market_time).total_seconds()
+                    )
                     parity = (complete_api
                               and not duplicate_screen_numbers
                               and set(screen_rows) == set(expected)
-                              and not mismatches)
+                              and not mismatches
+                              and screen_api_separation_s <= 90)
                     report["screen_parity"] = {
                         "status": "MATCH" if parity else "NOT_VERIFIED",
                         "matched_count": len(expected) - len(mismatches),
                         "expected_count": len(expected),
                         "mismatched_or_missing_numbers": mismatches,
                         "screen_rows_observed": len(screen_rows),
-                        "api_field_complete": complete_api}
+                        "api_field_complete": complete_api,
+                        "screen_api_capture_separation_seconds": screen_api_separation_s,
+                        "capture_separation_bound_seconds": 90}
                     report["win_startlist_audit"] = {
                         "status": audit["status"], "errors": audit["errors"],
                         "runner_count": len(expected),
@@ -223,6 +290,9 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                         "market_last_updated": audit.get("market_last_updated", []),
                         "source_timezone_assumption": "Europe/Oslo (unverified; no BET authorization)",
                         "screen_comparison": report["screen_parity"]["status"],
+                        "source_win_body_sha256": raw_winodds_evidence[-1]["playwright_body_sha256"],
+                        "source_official_startlist_body_sha256": raw_startlists_evidence[-1]["playwright_body_sha256"],
+                        "source_body_hashes_archived_and_readback_verified": False,
                         "bet_authorized": False}
                 else:
                     report["win_startlist_audit"] = {"status": "BLOCKED",
