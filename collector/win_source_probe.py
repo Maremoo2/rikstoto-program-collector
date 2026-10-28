@@ -8,12 +8,14 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import re
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
 from .winodds_adapter import parse_public_winodds
+from .private_source_archive import PrivateArchiveRejected, PrivateSourceArchive
 from .win_response_provenance import (
     SourceBodyRejected,
     inspect_public_response_body,
@@ -47,7 +49,10 @@ def validate_probe_url(url: str) -> bool:
             and not parsed.username and not parsed.password)
 
 
-async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
+async def probe(
+    url: str, *, timeout_ms: int = 12000,
+    private_archive_root: Path | None = None,
+) -> dict:
     report = {"schema": "prewatch_win_source_probe_v1",
               "url": url,
               "probe_started_utc": datetime.now(timezone.utc).isoformat(),
@@ -58,6 +63,20 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
     if not validate_probe_url(url):
         report["reason"] = "URL_NOT_PUBLIC_FIRST_PARTY_RACE_PAGE"
         return report
+    archive = None
+    if private_archive_root is not None:
+        # Explicit local opt-in only; no GitHub workflow uploads or archival
+        # against an untrusted/unknown meeting-race page.
+        if os.environ.get("GITHUB_ACTIONS", "").lower() == "true":
+            raise PrivateArchiveRejected("PRIVATE_ARCHIVE_FORBIDDEN_IN_ACTIONS")
+        match = re.search(r"/Spill/([A-Z0-9_-]{3,90})/V", url, re.I)
+        selected = re.search(r"(?:^|[?&])race=(\d+)", url)
+        if match is None or selected is None:
+            raise PrivateArchiveRejected("ARCHIVE_TARGET_RACE_IDENTITY_UNKNOWN")
+        archive = PrivateSourceArchive(
+            private_archive_root, meeting_id=match.group(1),
+            race_number=int(selected.group(1)),
+        )
     from playwright.async_api import async_playwright
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -91,7 +110,7 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                                 or (u.path.endswith("/starts")
                                     and "/api/racedays/" in u.path)):
                             payload, source_evidence = await inspect_public_response_body(
-                                response
+                                response, private_archive=archive,
                             )
                             entry["source_body_provenance"] = source_evidence
                             if source_evidence["source_kind"] == "WIN_ODDS":
@@ -108,6 +127,8 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                             entry["reason"] = "NOT_AN_APPROVED_WIN_OR_STARTLIST_ENDPOINT"
                 except SourceBodyRejected as exc:
                     entry["reason"] = "PUBLIC_RESPONSE_BODY_REJECTED:" + str(exc)
+                except PrivateArchiveRejected as exc:
+                    entry["reason"] = "PRIVATE_ARCHIVE_REJECTED:" + str(exc)
                 except Exception as exc:
                     entry["reason"] = f"UNREADABLE:{type(exc).__name__}"
                 candidate_responses.append(entry)
@@ -148,7 +169,7 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                         starts_response = await context.request.get(starts_url, timeout=timeout_ms)
                         if starts_response.status == 200 and "json" in starts_response.headers.get("content-type", "").lower():
                             payload, source_evidence = await inspect_public_response_body(
-                                starts_response
+                                starts_response, private_archive=archive,
                             )
                             if source_evidence["source_kind"] == "OFFICIAL_STARTLIST":
                                 raw_startlists.append(payload)
@@ -157,18 +178,32 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                         report["startlist_fallback_source_error"] = type(exc).__name__
             report["source_capture_counts"] = {
                 "winodds": len(raw_winodds), "official_starts": len(raw_startlists)}
+            all_evidence = raw_winodds_evidence + raw_startlists_evidence
+            all_archived = bool(
+                archive is not None
+                and raw_winodds_evidence and raw_startlists_evidence
+                and all(row.get("body_bytes_archived_and_readback_verified") is True
+                        for row in all_evidence)
+            )
             report["source_response_provenance"] = {
                 "winodds": raw_winodds_evidence,
                 "official_starts": raw_startlists_evidence,
-                "original_bodies_archived_and_readback_verified": False,
+                "original_bodies_archived_and_readback_verified": all_archived,
                 "independently_verified_live_win": False,
                 "bet_authorized": False,
             }
-            report["source_response_provenance_status"] = (
-                "HASHED_BODIES_NOT_ARCHIVED_OR_INDEPENDENTLY_VERIFIED"
-                if raw_winodds_evidence and raw_startlists_evidence
-                else "INCOMPLETE_OR_MISSING_SOURCE_BODY_HASHES"
-            )
+            if all_archived:
+                report["source_response_provenance_status"] = (
+                    "PRIVATE_BODY_READBACK_VERIFIED_SOURCE_STILL_UNVERIFIED"
+                )
+            elif raw_winodds_evidence and raw_startlists_evidence:
+                report["source_response_provenance_status"] = (
+                    "HASHED_BODIES_NOT_ARCHIVED_OR_INDEPENDENTLY_VERIFIED"
+                )
+            else:
+                report["source_response_provenance_status"] = (
+                    "INCOMPLETE_OR_MISSING_SOURCE_BODY_HASHES"
+                )
             # Unlike the former pre-navigation timestamp, this clock belongs
             # to the exact WIN body supplied to the current quote adapter.
             if raw_winodds_evidence:
@@ -292,7 +327,7 @@ async def probe(url: str, *, timeout_ms: int = 12000) -> dict:
                         "screen_comparison": report["screen_parity"]["status"],
                         "source_win_body_sha256": raw_winodds_evidence[-1]["playwright_body_sha256"],
                         "source_official_startlist_body_sha256": raw_startlists_evidence[-1]["playwright_body_sha256"],
-                        "source_body_hashes_archived_and_readback_verified": False,
+                        "source_body_hashes_archived_and_readback_verified": all_archived,
                         "bet_authorized": False}
                 else:
                     report["win_startlist_audit"] = {"status": "BLOCKED",
@@ -321,8 +356,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", required=True, help="Explicit verified public race URL")
     parser.add_argument("--output", default="win_source_probe.json")
+    parser.add_argument(
+        "--private-archive-root", type=Path, default=None,
+        help="EXPLICIT LOCAL ONLY; existing 0700 private root outside repository",
+    )
     args = parser.parse_args()
-    result = asyncio.run(probe(args.url))
+    result = asyncio.run(probe(
+        args.url, private_archive_root=args.private_archive_root,
+    ))
     target = Path(args.output)
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(json.dumps(result, indent=2), encoding="utf-8")
