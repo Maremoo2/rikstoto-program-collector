@@ -17,6 +17,7 @@ from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from .awatch_win_collector import _valid_meeting_id
+from .market_schedule import plan_awatch_market_checks
 from .phase_b_receipts import receipt_from_selective_collection
 
 SCHEMA = "phase_b_source_race_lineage_v1"
@@ -66,12 +67,15 @@ def _qualifying_manual_races(meetings: Any) -> dict[tuple[str, int], dict[str, A
             if key in all_keys:
                 raise ValueError("Duplicate manual race identity")
             all_keys.add(key)
-            score = race.get("prewatch_score")
-            if (
-                type(score) in (int, float) and 70 <= score <= 100
-                and race.get("prewatch_gates_passed") is True
-                and race.get("prewatch_status") == "A-WATCH"
-            ):
+            # Reuse Collector's single existing A-WATCH qualification rule,
+            # even for a race whose T-10/T-3 window is not currently due.
+            # A zero-length window cannot schedule network requests.
+            isolated = plan_awatch_market_checks(
+                [{"meeting_id": mid, "races": [race]}],
+                now=datetime(2000, 1, 1, tzinfo=UTC),
+                lookahead_minutes=0,
+            )
+            if isolated["selected_race_count"] == 1:
                 qualified[key] = race
     return qualified
 
