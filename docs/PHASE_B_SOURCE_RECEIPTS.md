@@ -85,7 +85,8 @@ A-WATCH scoring/scheduling path and the real
 - blocked source, false generic `DIAGNOSTIC_CAPTURED`, wrong race/URL,
   missing market update, too-old market update, late/poststart capture,
   missing API/screen parity and improper `bet_authorized=true` claims;
-- invalid/duplicate/unmatched probe entries;
+- invalid/duplicate/unmatched probe entries, contradictory declared
+  probe counts, or a schedule falsely claiming `bet_authorized=true`;
 - no source probe even when due;
 - deterministic no-mutation report SHA-256.
 
