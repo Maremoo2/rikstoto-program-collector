@@ -100,7 +100,8 @@ class _ResponseClock:
         return datetime.fromisoformat(value)
 
 
-def _run_probe(start_rows=None, win_body=WIN_BODY, screen_at=SCREEN_CAPTURED):
+def _run_probe(start_rows=None, win_body=WIN_BODY, screen_at=SCREEN_CAPTURED,
+               private_archive_root=None):
     _ProbeClock.calls = 0
     _ProbeClock.screen_at = screen_at
     start_rows = STARTS if start_rows is None else start_rows
@@ -142,7 +143,9 @@ def _run_probe(start_rows=None, win_body=WIN_BODY, screen_at=SCREEN_CAPTURED):
         patch.object(win_source_probe, "datetime", _ProbeClock),
         patch.object(win_response_provenance, "datetime", _ResponseClock),
     ):
-        result = asyncio.run(win_source_probe.probe(RACE_URL))
+        result = asyncio.run(win_source_probe.probe(
+            RACE_URL, private_archive_root=private_archive_root,
+        ))
     return result, candidates, actual_starts
 
 
@@ -242,3 +245,70 @@ def test_delayed_screen_can_never_retroactively_corrobate_old_api_quote():
     assert result["screen_parity"]["screen_api_capture_separation_seconds"] == 120.0
     assert result["screen_parity"]["status"] == "NOT_VERIFIED"
     assert result["bet_authorized"] is False
+
+
+def test_opt_in_browser_capture_writes_only_private_original_bytes(tmp_path, monkeypatch):
+    from collector.private_source_archive import verify_private_source_record
+
+    # Never run real network; simulate a local, explicitly opted-in session.
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    root = tmp_path / "private-source"
+    root.mkdir(mode=0o700)
+    root.chmod(0o700)
+
+    result, responses, starts_bytes = _run_probe(private_archive_root=root)
+    assert result["status"] == "DIAGNOSTIC_CAPTURED"
+    assert result["source_response_provenance_status"] == (
+        "PRIVATE_BODY_READBACK_VERIFIED_SOURCE_STILL_UNVERIFIED"
+    )
+    source = result["source_response_provenance"]
+    assert source["original_bodies_archived_and_readback_verified"] is True
+    assert len(list(root.iterdir())) == 4  # two original bodies + two manifests
+    for kind, body in (("winodds", WIN_BODY), ("official_starts", starts_bytes)):
+        evidence = source[kind][0]
+        assert evidence["body_bytes_archived_and_readback_verified"] is True
+        record_id = evidence["private_archive_record_id"]
+        assert (root / f"{record_id}.body").read_bytes() == body
+        receipt = verify_private_source_record(root, record_id)
+        assert receipt["playwright_body_sha256"] == hashlib.sha256(body).hexdigest()
+        assert receipt["private_readback_sha256_verified"] is True
+    assert responses[0].body_calls == 1
+    assert responses[1].body_calls == 1
+    assert result["win_startlist_audit"][
+        "source_body_hashes_archived_and_readback_verified"
+    ] is True
+    assert result["win_market_verified"] is False
+    assert result["bet_authorized"] is False
+    assert "private-source" not in json.dumps(result)
+
+
+def test_unopted_browser_probe_never_writes_original_bodies(tmp_path):
+    root = tmp_path / "private-source"
+    root.mkdir(mode=0o700)
+    result, _, _ = _run_probe()
+    assert list(root.iterdir()) == []
+    assert result["source_response_provenance"][
+        "original_bodies_archived_and_readback_verified"
+    ] is False
+    assert result["bet_authorized"] is False
+
+
+def test_opt_in_raw_archiving_refuses_github_actions(tmp_path, monkeypatch):
+    from collector.private_source_archive import PrivateArchiveRejected
+
+    root = tmp_path / "private-source"
+    root.mkdir(mode=0o700)
+    root.chmod(0o700)
+    monkeypatch.setenv("GITHUB_ACTIONS", "true")
+    with (
+        patch.object(win_source_probe, "validate_probe_url", return_value=True),
+    ):
+        import pytest
+
+        with pytest.raises(
+            PrivateArchiveRejected, match="PRIVATE_ARCHIVE_FORBIDDEN_IN_ACTIONS"
+        ):
+            asyncio.run(win_source_probe.probe(
+                RACE_URL, private_archive_root=root,
+            ))
+    assert list(root.iterdir()) == []
