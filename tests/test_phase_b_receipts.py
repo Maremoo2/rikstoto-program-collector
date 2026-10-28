@@ -188,6 +188,9 @@ def test_duplicate_probe_entries_and_non_due_probe_fail_closed():
     report, _ = asyncio.run(_run([_race()]))
     duplicate = copy.deepcopy(report)
     duplicate["races"].append(copy.deepcopy(duplicate["races"][0]))
+    # Isolate duplicate-key validation by satisfying the separate
+    # declared-count invariant; otherwise the count gate fails first.
+    duplicate["probed_race_count"] = 2
     with pytest.raises(ValueError, match="Repeated probe"):
         receipt_from_selective_collection(duplicate)
     extra = copy.deepcopy(report)
