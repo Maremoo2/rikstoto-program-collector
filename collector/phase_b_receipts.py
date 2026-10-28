@@ -131,6 +131,13 @@ def receipt_from_selective_collection(result: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("Incomplete selective source envelope")
     if result.get("bet_authorized") is not False:
         raise ValueError("Source envelope must not authorize a bet")
+    if schedule.get("phase") != "B_MARKET_ONLY" or schedule.get("bet_authorized") is not False:
+        raise ValueError("Schedule must remain Phase B market-only and nonbetting")
+    stated_probes = result.get("probed_race_count")
+    if stated_probes is not None and (
+        type(stated_probes) is not int or stated_probes != len(entries)
+    ):
+        raise ValueError("Probed race count contradicts diagnostic entries")
 
     due, mismatched_starts = _due_starts(schedule)
     selected = schedule.get("selected_race_count")
