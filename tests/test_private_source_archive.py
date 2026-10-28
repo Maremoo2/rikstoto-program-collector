@@ -7,6 +7,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import subprocess
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -221,3 +223,36 @@ def test_existing_manifest_collision_never_erases_prior_file(private_root):
             archive.write_body(WIN_BYTES, _evidence())
     assert path.read_bytes() == old_manifest
     assert not (private_root / (fixed_id + ".body")).exists()
+
+
+def test_readback_cli_reports_only_provenance_without_original_bytes(private_root):
+    record = _archive(private_root).write_body(WIN_BYTES, _evidence())
+    command = [
+        sys.executable, "-m", "collector.private_source_archive",
+        "--archive-root", str(private_root),
+        "--record-id", record["record_id"],
+    ]
+    response = subprocess.run(command, capture_output=True, text=True, check=False)
+    assert response.returncode == 0, response.stderr
+    returned = json.loads(response.stdout)
+    assert returned == record
+    assert returned["private_readback_sha256_verified"] is True
+    assert returned["bet_authorized"] is False
+    assert WIN_BYTES.decode("utf-8") not in response.stdout
+    assert str(private_root) not in response.stdout
+
+
+def test_readback_cli_cannot_approve_tampered_source_bytes(private_root):
+    record = _archive(private_root).write_body(WIN_BYTES, _evidence())
+    (private_root / (record["record_id"] + ".body")).write_bytes(b'{"wrong":true}')
+    response = subprocess.run(
+        [
+            sys.executable, "-m", "collector.private_source_archive",
+            "--archive-root", str(private_root),
+            "--record-id", record["record_id"],
+        ],
+        capture_output=True, text=True, check=False,
+    )
+    assert response.returncode != 0
+    assert "PRIVATE_BODY_READBACK_SHA256_MISMATCH" in response.stderr
+    assert "private_readback_sha256_verified" not in response.stdout
