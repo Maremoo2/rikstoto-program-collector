@@ -13,6 +13,8 @@ selected by the manually scored A-WATCH submission, had the same
 scheduled start, and was quoted in the correct local race-date window.
 
 This new read-only tool **never constructs a new A-WATCH score**. It
+reuses the existing `plan_awatch_market_checks()` for qualification rather
+than introducing separate score or gate policy. It
 joins three *existing* artefacts by **exact meeting ID and race number**:
 
 1. `scored_prewatch.json`: the same manually submitted `meetings/races`
