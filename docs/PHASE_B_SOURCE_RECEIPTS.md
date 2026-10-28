@@ -90,10 +90,15 @@ A-WATCH scoring/scheduling path and the real
 - deterministic no-mutation report SHA-256.
 
 The workflow summary now publishes receipt status and the due/attempted
-counts. It does **not** change schedule, input authorization,
-permissions, scraping scope or trigger time. The output remains a
-seven-day GitHub Actions diagnostic artifact under the existing
-workflow settings; even a successful job cannot claim a BET.
+counts. The **actual embedded Actions summary Python script** is executed
+separately in regression tests against five terminal-state mock payloads,
+a missing diagnostic artifact and a missing receipt; all must still
+display `BET_BLOCKED` or an explicit blocker. This is a local
+rendering/contract test, not a dispatch of the live workflow. It does
+**not** change schedule, input authorization, permissions, scraping
+scope or trigger time. The output remains a seven-day GitHub Actions
+diagnostic artifact under the existing workflow settings; even a
+successful job cannot claim a BET.
 
 No source polling of currently unknown A-WATCH races was triggered to
 verify this PR. **Tests are synthetic; real-source acceptance remains
