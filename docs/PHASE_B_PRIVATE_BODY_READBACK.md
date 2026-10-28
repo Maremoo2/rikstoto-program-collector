@@ -60,16 +60,18 @@ minimum price, EV, betting signals or stakes are created.
 
 ### Independent offline recheck
 
-```python
-from pathlib import Path
-from collector.private_source_archive import verify_private_source_record
+Run the strictly **read-only, offline** record verifier:
 
-receipt = verify_private_source_record(
-    Path("/secure/private-racing-archive"), "<32-char-private-record-id>"
-)
-assert receipt["private_readback_sha256_verified"]
-assert not receipt["bet_authorized"]
+```bash
+python -m collector.private_source_archive \
+  --archive-root /secure/private-racing-archive \
+  --record-id <32-char-private-record-id>
 ```
+
+It prints only source metadata and SHA results, never original response
+bytes, credentials or the archive's absolute path. The equivalent Python
+API is `verify_private_source_record(Path(root), record_id)`. An
+altered body or unsafe manifest must exit unsuccessfully.
 
 The comparison covers SHA-256 and exact byte length; it also rejects
 manifest/body filename mismatch, unknown record IDs, symlinked files,
@@ -95,7 +97,13 @@ original byte checksums, tampering and mutated manifests, second
 capture without overwriting the first, symlink/permission/unsafe path
 refusals, pre-existing race identity, no credentials in metadata,
 default-disabled archiving, and explicit rejection when an Actions
-environment attempts to enable raw-body archiving.
+environment attempts to enable raw-body archiving. The additional
+readback CLI tests prove that an intact local record is verified,
+while a tampered body makes the command fail without printing raw bytes.
+
+A random-ID collision must preserve the older manifest and body bytes;
+tests now cover both body-ID collisions and pre-existing manifest
+collisions without destroying prior archived evidence.
 
 This branch deliberately does **not** change the manual/automatic
 schedules, grant access to new URLs, bypass robots, relax stale quotes,
