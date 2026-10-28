@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 from urllib.parse import quote
 from .market_schedule import plan_awatch_market_checks
+from .phase_b_receipts import receipt_from_selective_collection
 from .win_source_probe import probe
 
 
@@ -64,10 +65,14 @@ async def collect(meetings, *, now, lookahead_minutes=10):
         results.append({"meeting_id": meeting_id, "race_number": race_number,
                         "url": url, "diagnostic": result,
                         "bet_authorized": False})
-    return {"schema": "prewatch_awatch_win_collection_v1",
-            "phase": "B_MARKET_ONLY", "schedule": schedule,
-            "probed_race_count": len(results), "races": results,
-            "bet_authorized": False, "automated_betting": False}
+    report = {"schema": "prewatch_awatch_win_collection_v1",
+              "phase": "B_MARKET_ONLY", "schedule": schedule,
+              "probed_race_count": len(results), "races": results,
+              "bet_authorized": False, "automated_betting": False}
+    # A green workflow does not mean Phase B passed. Every run, including
+    # 0 probes, gets a terminal source-only status with exact race reasons.
+    report["receipt"] = receipt_from_selective_collection(report)
+    return report
 
 
 def main():
@@ -86,6 +91,7 @@ def main():
     target.write_text(json.dumps(result, indent=2), encoding="utf-8")
     print(json.dumps({"phase": result["phase"],
                       "probed_race_count": result["probed_race_count"],
+                      "terminal_status": result["receipt"]["status"],
                       "bet_authorized": False}))
 
 
