@@ -11,7 +11,7 @@ import hashlib
 import json
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from collector import win_response_provenance, win_source_probe
 
@@ -125,10 +125,11 @@ def _run_probe(start_rows=None, win_body=WIN_BODY):
     playwright = SimpleNamespace(chromium=SimpleNamespace(
         launch=AsyncMock(return_value=browser),
     ))
-    manager = SimpleNamespace(
-        __aenter__=AsyncMock(return_value=playwright),
-        __aexit__=AsyncMock(return_value=None),
-    )
+    # Python looks up async context-manager special methods on the TYPE,
+    # not attributes of SimpleNamespace instances.
+    manager = MagicMock()
+    manager.__aenter__ = AsyncMock(return_value=playwright)
+    manager.__aexit__ = AsyncMock(return_value=None)
     robots = SimpleNamespace(permits=lambda url: True)
 
     # Source-level browser integration: no actual HTTP or real race captured.
