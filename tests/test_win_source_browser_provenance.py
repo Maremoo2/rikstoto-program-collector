@@ -82,11 +82,12 @@ class _Page:
 
 class _ProbeClock:
     calls = 0
+    screen_at = SCREEN_CAPTURED
 
     @classmethod
     def now(cls, tz):
         cls.calls += 1
-        return PRESTART if cls.calls == 1 else SCREEN_CAPTURED
+        return PRESTART if cls.calls == 1 else cls.screen_at
 
 
 class _ResponseClock:
@@ -99,8 +100,9 @@ class _ResponseClock:
         return datetime.fromisoformat(value)
 
 
-def _run_probe(start_rows=None, win_body=WIN_BODY):
+def _run_probe(start_rows=None, win_body=WIN_BODY, screen_at=SCREEN_CAPTURED):
     _ProbeClock.calls = 0
+    _ProbeClock.screen_at = screen_at
     start_rows = STARTS if start_rows is None else start_rows
     actual_starts = json.dumps(
         {"success": True, "result": {"2": start_rows}},
@@ -214,4 +216,29 @@ def test_failed_exact_win_body_does_not_qualify_as_hashed_evidence():
         "DUPLICATE_JSON_KEYS" in entry.get("reason", "")
         for entry in result["candidate_response_schemas"]
     )
+    assert result["bet_authorized"] is False
+
+
+def test_provenance_clock_rejects_quote_that_pre_navigation_clock_would_accept():
+    # Prior bug: probe_started=11:55 would make 11:54 appear ~1 min old.
+    # Actual WIN body arrives at 12:00, so the quote is 6 min old.
+    source = json.loads(WIN_BODY)
+    source["result"]["2"][0]["lastUpdated"] = "2026-10-20T11:54:00Z"
+    result, _, _ = _run_probe(
+        win_body=json.dumps(source, separators=(",", ":")).encode("utf-8")
+    )
+    assert result["probe_started_utc"] == PRESTART.isoformat()
+    assert result["captured_utc"] == BODY_CAPTURED.isoformat()
+    assert result["win_startlist_audit"]["status"] == "BLOCKED"
+    assert "STALE_MARKET_ODDS" in result["win_startlist_audit"]["errors"]
+    assert result["bet_authorized"] is False
+
+
+def test_delayed_screen_can_never_retroactively_corrobate_old_api_quote():
+    result, _, _ = _run_probe(
+        screen_at=datetime(2026, 10, 20, 12, 2, tzinfo=UTC)
+    )
+    assert result["win_startlist_audit"]["status"] == "STRUCTURE_VALID_UNVERIFIED"
+    assert result["screen_parity"]["screen_api_capture_separation_seconds"] == 120.0
+    assert result["screen_parity"]["status"] == "NOT_VERIFIED"
     assert result["bet_authorized"] is False
