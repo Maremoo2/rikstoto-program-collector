@@ -93,6 +93,43 @@ def reconcile_startlist(pdf_races: list[dict[str, Any]], source: Any,
                                         ]})
             continue
 
+        # A full race with EVERY isScratched flag set is an anomaly, not
+        # independent proof that the entire race was withdrawn. On 27 Oct
+        # 2026, archived F2_NR Gelsenkirchen races 6 and 7 had 5/5 and 8/8
+        # such flags, yet independent published results show both ran.
+        # Retain raw flags in starts.json. Do not convert them to a
+        # seemingly verified empty field or silently infer active runners.
+        if all(entry["isScratched"] is True for entry in api_horses.values()):
+            audit["mismatches"].append({
+                "code": "ALL_RUNNERS_SCRATCH_FLAG_REQUIRES_INDEPENDENT_CONFIRMATION",
+                "race": race_no,
+                "raw_flagged_runner_count": len(api_horses),
+            })
+            doc["raw_scratch_flag_candidates"] = [
+                {
+                    "horse_number": number,
+                    "horse_name": pdf_horses[number]["name"],
+                    "isScratched_raw": True,
+                    "captured_utc": captured_at,
+                    "verification": "UNVERIFIED_ALL_RUNNERS_FLAGGED",
+                }
+                for number in sorted(api_horses)
+            ]
+            doc["scratches"] = []
+            for horse in pdf_horses.values():
+                horse["scratched"] = None
+                horse["scratch_state"] = "UNKNOWN_ALL_RUNNERS_FLAGGED"
+                horse["scratch_source"] = "public_startlist_isScratched_UNVERIFIED"
+                horse["scratch_captured_utc"] = captured_at
+            qa = doc["qa"]
+            qa["scratched_count"] = None
+            qa["active_count"] = None
+            qa["scratch_verification"] = "UNVERIFIED_ALL_RUNNERS_FLAGGED"
+            qa["scratches_complete_as_of_snapshot"] = False
+            if "ALL_RUNNERS_SCRATCH_FLAG_REVIEW" not in qa.setdefault("warnings", []):
+                qa["warnings"].append("ALL_RUNNERS_SCRATCH_FLAG_REVIEW")
+            continue
+
         # Only after FULL identity and schema agreement is scratch state set.
         scratches = []
         for number, entry in api_horses.items():
