@@ -72,7 +72,16 @@ jobs:
               else:
                   data = json.loads(path.read_text())
                   f.write(f"Qualified due races probed: {data['probed_race_count']}\n\n")
-                  f.write("BET authorization: **NO**. Manual input is not independent Pre-Watch proof.\n")
+                  receipt = data.get("receipt")
+                  if not isinstance(receipt, dict):
+                      f.write("**BLOCKED: missing Phase B terminal receipt.**\n\n")
+                  else:
+                      f.write(f"Terminal diagnostic state: `{receipt['status']}`\n\n")
+                      f.write(f"Manually submitted selected A-WATCH races: {receipt['selected_by_manual_prewatch_input']}\n\n")
+                      f.write(f"Due unique races: {receipt['due_unique_races']}\n\n")
+                      f.write(f"Source requests attempted: {receipt['probes_attempted']}\n\n")
+                      f.write(f"Outcome distribution: `{json.dumps(receipt['due_terminal_counts'], sort_keys=True)}`\n\n")
+                  f.write("**BET_BLOCKED.** A green job or captured diagnostic is not independently frozen A-WATCH, verified live WIN pool, calibrated p(win) or a bet.\n")
           PY
       - uses: actions/upload-artifact@v4
         if: always()
