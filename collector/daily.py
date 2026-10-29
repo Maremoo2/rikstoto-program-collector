@@ -503,13 +503,33 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
             # Link X1 product legs to uniquely identified physical races
             # using full-field names, numbers and scratch flags; neither
             # same-provider agreement nor PDF matching authorizes BET.
-            physical_sources = {
-                item["meeting_id"]: {
-                    "starts": starts_by_meeting.get(item["meeting_id"]),
+            physical_sources = {}
+            for item in manifest["meetings"]:
+                if item["is_multi_track_product"]:
+                    continue
+                meeting = item["meeting_id"]
+                pdf_number_sources = {}
+                physical_pdf_file = folder / "meetings" / meeting / "structured_program.json"
+                if physical_pdf_file.is_file():
+                    try:
+                        parsed_docs = json.loads(
+                            physical_pdf_file.read_text(encoding="utf-8")).get("races", [])
+                        for doc in parsed_docs:
+                            number = doc["race"]["race_number"]
+                            number_source = doc["race"].get("race_number_source")
+                            # Duplicate physical race numbers invalidate
+                            # their explicit-number evidence, not just one row.
+                            if number in pdf_number_sources:
+                                pdf_number_sources[number] = None
+                            else:
+                                pdf_number_sources[number] = number_source
+                    except (OSError, ValueError, TypeError, KeyError):
+                        pdf_number_sources = {}
+                physical_sources[meeting] = {
+                    "starts": starts_by_meeting.get(meeting),
                     "pdf_audit_status": item.get("startlist_pdf_audit", {}).get("status"),
+                    "pdf_race_number_sources": pdf_number_sources,
                 }
-                for item in manifest["meetings"] if not item["is_multi_track_product"]
-            }
             for item in manifest["meetings"]:
                 if not item["is_multi_track_product"]:
                     continue

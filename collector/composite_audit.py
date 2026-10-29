@@ -15,7 +15,26 @@ independently verified market, complete daily schedule or BET approval.
 """
 from __future__ import annotations
 
+import re
 import unicodedata
+from datetime import date
+
+# Both product and physical race IDs must identify the SAME actual race date.
+_MEETING_ID = re.compile(r"[A-Z0-9]{1,14}_[A-Z]{2,4}_(20\d{2}-\d{2}-\d{2})", re.I)
+_EXPLICIT_PDF_NUMBER_SOURCES = frozenset(("pdf_heading", "pdf_heading_number"))
+
+
+def _meeting_day(meeting_id):
+    if not isinstance(meeting_id, str):
+        return None
+    match = _MEETING_ID.fullmatch(meeting_id)
+    if not match:
+        return None
+    try:
+        return date.fromisoformat(match.group(1)).isoformat()
+    except ValueError:
+        return None
+
 
 
 def _normal_name(value):
@@ -69,6 +88,9 @@ def _pdf_races(races):
         if not isinstance(item, dict) or not isinstance(item.get("race"), dict):
             return None
         number = item["race"].get("race_number")
+        # Do not accept an ordinal fallback as physical race evidence.
+        if item["race"].get("race_number_source") not in _EXPLICIT_PDF_NUMBER_SOURCES:
+            return None
         entrants = item.get("entrants")
         if type(number) is not int or number < 1 or not isinstance(entrants, list) or not entrants:
             return None
@@ -93,7 +115,8 @@ def audit_composite_lineage(composite_meeting_id, composite_starts,
 
     physical_sources maps a physical meeting ID to:
       {"starts": raw official starts response,
-       "pdf_audit_status": "MATCHED_AS_OF_SNAPSHOT"}.
+       "pdf_audit_status": "MATCHED_AS_OF_SNAPSHOT",
+       "pdf_race_number_sources": {7: "pdf_heading", ...}}.
     A successfully linked product is still a distinct multi-track product.
     """
     result = {
@@ -108,6 +131,10 @@ def audit_composite_lineage(composite_meeting_id, composite_starts,
     }
     if not isinstance(composite_meeting_id, str) or not composite_meeting_id:
         result["reason"] = "COMPOSITE_ID_MISSING"
+        return result
+    composite_day = _meeting_day(composite_meeting_id)
+    if composite_day is None:
+        result["reason"] = "COMPOSITE_ID_INVALID_OR_DATE_UNKNOWN"
         return result
     legs = _race_lists(composite_starts, composite_meeting_id)
     if legs is None:
@@ -124,11 +151,17 @@ def audit_composite_lineage(composite_meeting_id, composite_starts,
     physical = {}
     for meeting_id, source in physical_sources.items():
         if (meeting_id == composite_meeting_id or not isinstance(source, dict)
+                or _meeting_day(meeting_id) != composite_day
                 or source.get("pdf_audit_status") != "MATCHED_AS_OF_SNAPSHOT"):
+            continue
+        pdf_number_sources = source.get("pdf_race_number_sources")
+        if not isinstance(pdf_number_sources, dict):
             continue
         records = _race_lists(source.get("starts"), meeting_id)
         if records is not None:
             for race_number, signature in records.items():
+                if pdf_number_sources.get(race_number) not in _EXPLICIT_PDF_NUMBER_SOURCES:
+                    continue
                 physical[(meeting_id, race_number)] = signature
     if not physical:
         result["reason"] = "NO_PDF_RECONCILED_PHYSICAL_RACES"
