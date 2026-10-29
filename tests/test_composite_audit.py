@@ -13,7 +13,7 @@ def _starts(meeting, races):
 
 
 def _pdf(races):
-    return [{"race": {"race_number": number},
+    return [{"race": {"race_number": number, "race_number_source": "pdf_heading"},
              "entrants": [{"program_number": n, "name": horse.upper()}
                           for n, horse, _ in rows]}
             for number, rows in races]
@@ -44,7 +44,9 @@ COMPOSITE = {
 
 def _sources():
     return {meeting: {"starts": _starts(meeting, races),
-                      "pdf_audit_status": "MATCHED_AS_OF_SNAPSHOT"}
+                      "pdf_audit_status": "MATCHED_AS_OF_SNAPSHOT",
+                      "pdf_race_number_sources": {
+                          n: "pdf_heading" for n in races}}
             for meeting, races in PHYSICAL.items()}
 
 
@@ -88,7 +90,8 @@ def test_ambiguous_physical_match_is_blocked():
     sources = _sources()
     sources["OTHER_NR_2026-10-29"] = {
         "starts": _starts("OTHER_NR_2026-10-29", {7: COMPOSITE[1]}),
-        "pdf_audit_status": "MATCHED_AS_OF_SNAPSHOT"}
+        "pdf_audit_status": "MATCHED_AS_OF_SNAPSHOT",
+        "pdf_race_number_sources": {7: "pdf_heading"}}
     audit = audit_composite_lineage(
         X1, _starts(X1, COMPOSITE), _pdf([(7, COMPOSITE[1]), (9, COMPOSITE[2]),
                                          (8, COMPOSITE[3]), (10, COMPOSITE[4])]),
@@ -182,9 +185,12 @@ def test_real_archived_2026_10_29_complete_37_runner_x1_lineage():
     }
     physical = {
         BT: {"starts": _starts(BT, {7: real_legs[1], 8: real_legs[3]}),
-             "pdf_audit_status": "MATCHED_AS_OF_SNAPSHOT"},
+             "pdf_audit_status": "MATCHED_AS_OF_SNAPSHOT",
+             "pdf_race_number_sources": {7: "pdf_heading", 8: "pdf_heading"}},
         S2: {"starts": _starts(S2, {9: real_legs[2], 10: real_legs[4]}),
-             "pdf_audit_status": "MATCHED_AS_OF_SNAPSHOT"},
+             "pdf_audit_status": "MATCHED_AS_OF_SNAPSHOT",
+             "pdf_race_number_sources": {9: "pdf_heading",
+                                         10: "pdf_heading_number"}},
     }
     pdf = _pdf([(7, real_legs[1]), (9, real_legs[2]),
                 (8, real_legs[3]), (10, real_legs[4])])
@@ -195,3 +201,57 @@ def test_real_archived_2026_10_29_complete_37_runner_x1_lineage():
     assert [(leg["physical_meeting_id"], leg["physical_race_number"])
             for leg in audit["legs"]] == [(BT, 7), (S2, 9), (BT, 8), (S2, 10)]
     assert audit["bet_authorized"] is False
+
+
+def test_composite_pdf_order_inferred_number_blocks_even_on_exact_field():
+    pdf = _pdf([(7, COMPOSITE[1]), (9, COMPOSITE[2]),
+                (8, COMPOSITE[3]), (10, COMPOSITE[4])])
+    pdf[0]["race"]["race_number_source"] = "pdf_order_inferred"
+    audit = audit_composite_lineage(X1, _starts(X1, COMPOSITE), pdf, _sources())
+    assert audit["status"] == "BLOCKED"
+    assert audit["reason"] == "COMPOSITE_PDF_UNVERIFIED"
+
+
+def test_physical_pdf_order_inferred_number_not_proof():
+    sources = _sources()
+    sources[BT]["pdf_race_number_sources"][7] = "pdf_order_inferred"
+    audit = audit_composite_lineage(
+        X1, _starts(X1, COMPOSITE),
+        _pdf([(7, COMPOSITE[1]), (9, COMPOSITE[2]),
+              (8, COMPOSITE[3]), (10, COMPOSITE[4])]), sources)
+    assert audit["status"] == "BLOCKED"
+    assert audit["legs"][0]["reason"] == "NO_EXACT_PHYSICAL_MATCH"
+
+
+def test_missing_physical_pdf_number_provenance_blocks():
+    sources = _sources()
+    del sources[BT]["pdf_race_number_sources"]
+    audit = audit_composite_lineage(
+        X1, _starts(X1, COMPOSITE),
+        _pdf([(7, COMPOSITE[1]), (9, COMPOSITE[2]),
+              (8, COMPOSITE[3]), (10, COMPOSITE[4])]), sources)
+    assert audit["status"] == "BLOCKED"
+    assert audit["legs"][0]["reason"] == "NO_EXACT_PHYSICAL_MATCH"
+
+
+def test_other_date_physical_field_does_not_match():
+    sources = _sources()
+    other = "BT_NR_2026-10-28"
+    sources[other] = {"starts": _starts(other, {7: COMPOSITE[1]}),
+                      "pdf_audit_status": "MATCHED_AS_OF_SNAPSHOT",
+                      "pdf_race_number_sources": {7: "pdf_heading"}}
+    del sources[BT]["pdf_race_number_sources"][7]
+    audit = audit_composite_lineage(
+        X1, _starts(X1, COMPOSITE),
+        _pdf([(7, COMPOSITE[1]), (9, COMPOSITE[2]),
+              (8, COMPOSITE[3]), (10, COMPOSITE[4])]), sources)
+    assert audit["status"] == "BLOCKED"
+    assert audit["legs"][0]["reason"] == "NO_EXACT_PHYSICAL_MATCH"
+
+
+def test_invalid_composite_date_fails_closed():
+    audit = audit_composite_lineage(
+        "X1_NR_2026-13-29", _starts(X1, COMPOSITE),
+        _pdf([(7, COMPOSITE[1])]), _sources())
+    assert audit["status"] == "BLOCKED"
+    assert audit["reason"] == "COMPOSITE_ID_INVALID_OR_DATE_UNKNOWN"
