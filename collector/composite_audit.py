@@ -20,7 +20,7 @@ import unicodedata
 from datetime import date
 
 # Both product and physical race IDs must identify the SAME actual race date.
-_MEETING_ID = re.compile(r"[A-Z0-9]{1,14}_[A-Z]{2,4}_(20\\d{2}-\\d{2}-\\d{2})", re.I)
+_MEETING_ID = re.compile(r"[A-Z0-9]{1,14}_[A-Z]{2,4}_(20\d{2}-\d{2}-\d{2})", re.I)
 _EXPLICIT_PDF_NUMBER_SOURCES = frozenset(("pdf_heading", "pdf_heading_number"))
 
 
