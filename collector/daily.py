@@ -26,6 +26,7 @@ from .pipeline import DOMAIN, USER_AGENT, check_robots, source_allowed
 from .pdf_program import parse_extended_pdf
 from .calendar_audit import calendar_window, calendar_racedays, diagnose_calendar_response
 from .startlist_audit import reconcile_startlist
+from .composite_audit import audit_composite_lineage
 from .homepage_schedule import homepage_racedays, schedule_comparison
 
 OSLO = ZoneInfo("Europe/Oslo")
@@ -284,6 +285,7 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
                     (f"https://{DOMAIN}/api/racedays/multiTracks", "multitracks"),
                 ]
                 meeting_set = set()
+                starts_by_meeting = {}
                 calendar_entries = {}
                 direct_racedays = {}
                 embedded_home = {"status": "NOT_PRESENT", "meetings": {}, "api_path": None}
@@ -378,6 +380,8 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
                     base = f"https://{DOMAIN}"
                     starts_url = f"{base}/api/racedays/{meeting}/starts"
                     starts = await request(ctx, robots, starts_url, mdir / "starts.json", logs)
+                    if starts is not None:
+                        starts_by_meeting[meeting] = starts
                     if starts is None:
                         record["scratching_status"] = "SOURCE_UNAVAILABLE"
                         warnings.append(f"STARTS_UNAVAILABLE:{meeting}")
@@ -496,6 +500,35 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
                                   f"{base}/api/game/program/{meeting}/driverChanges",
                                   mdir / "driver_changes.json", logs)
                     record["captured_utc"] = utcnow()
+            # Link X1 product legs to uniquely identified physical races
+            # using full-field names, numbers and scratch flags; neither
+            # same-provider agreement nor PDF matching authorizes BET.
+            physical_sources = {
+                item["meeting_id"]: {
+                    "starts": starts_by_meeting.get(item["meeting_id"]),
+                    "pdf_audit_status": item.get("startlist_pdf_audit", {}).get("status"),
+                }
+                for item in manifest["meetings"] if not item["is_multi_track_product"]
+            }
+            for item in manifest["meetings"]:
+                if not item["is_multi_track_product"]:
+                    continue
+                meeting = item["meeting_id"]
+                composite_pdf_file = folder / "meetings" / meeting / "structured_program.json"
+                composite_pdf_races = None
+                if composite_pdf_file.is_file():
+                    try:
+                        composite_pdf_races = json.loads(
+                            composite_pdf_file.read_text(encoding="utf-8")).get("races")
+                    except (OSError, ValueError, TypeError):
+                        pass
+                audit = audit_composite_lineage(
+                    meeting, starts_by_meeting.get(meeting),
+                    composite_pdf_races, physical_sources)
+                item["composite_physical_audit"] = audit
+                dump(folder / "meetings" / meeting / "composite_physical_lineage.json", audit)
+                if audit["status"] != "MATCHED_TO_PHYSICAL_PDF_SNAPSHOTS":
+                    warnings.append(f"COMPOSITE_PHYSICAL_LINEAGE_UNVERIFIED:{meeting}")
             if not manifest["meetings"]:
                 warnings.append("NO_PROGRAMS_ARCHIVED")
             elif any(r["program_pdf"] != "PDF_TEXT_OK" for r in manifest["meetings"]):
