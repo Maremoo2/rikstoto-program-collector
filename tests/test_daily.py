@@ -3,7 +3,7 @@ import json
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from collector.daily import meeting_ids, race_numbers, scratch_signals, oslo_date
+from collector.daily import meeting_ids, race_numbers, scratch_signals, oslo_date, calendar_source_evidence
 
 
 def test_extract_only_actual_ids_on_selected_date():
@@ -81,3 +81,29 @@ def test_explicit_horse_status_is_recorded():
     assert result["explicit_status_fields_seen"] == 2
     assert len(result["positive_scratches"]) == 1
     assert result["positive_scratches"][0]["horse_number"] == 2
+
+
+def test_calendar_diagnostic_provenance_from_real_archive_shape():
+    url = "https://www.rikstoto.no/api/racedays/dates/2026-10-29/2026-10-30"
+    log = [{"url": url, "status": "JSON_OK", "sha256": "a" * 64,
+            "at_utc": "2026-10-29T06:23:18Z"}]
+    result = calendar_source_evidence(
+        {"result": [], "success": True, "errorCode": None, "message": None},
+        "2026-10-29", url, log)
+    assert result["status"] == "EMPTY_RESULT_ARRAY"
+    assert result["source_url"] == url
+    assert result["request_status"] == "JSON_OK"
+    assert result["response_sha256"] == "a" * 64
+    assert result["request_at_utc"] == "2026-10-29T06:23:18Z"
+    assert result["date_coverage_verified"] is False
+
+
+def test_calendar_diagnostic_failure_never_invents_provenance():
+    url = "https://www.rikstoto.no/api/racedays/dates/2026-10-29/2026-10-30"
+    result = calendar_source_evidence(
+        None, "2026-10-29", url, [{"url": url, "status": "HTTP_503",
+                                   "at_utc": "2026-10-29T06:23:18Z"}])
+    assert result["status"] == "SOURCE_UNAVAILABLE"
+    assert result["request_status"] == "HTTP_503"
+    assert result["response_sha256"] is None
+    assert result["date_coverage_verified"] is False
