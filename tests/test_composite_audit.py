@@ -150,3 +150,48 @@ def test_wrong_race_key_fails_closed():
     audit = audit_composite_lineage(X1, starts, _pdf([(7, COMPOSITE[1])]), _sources())
     assert audit["status"] == "BLOCKED"
     assert audit["reason"] == "COMPOSITE_STARTLIST_UNVERIFIED"
+
+
+def test_real_archived_2026_10_29_complete_37_runner_x1_lineage():
+    """All runners transcribed from original GitHub Actions #40828821019.
+
+    These four fields correspond to X1 legs and physical Bergen 7/8,
+    Åby 9/10. Includes the two observed Åby 9 scratches.
+    This is historical fixture proof, not a live WIN market test.
+    """
+    real_legs = {
+        1: [(1, "Silkesvarta", False), (2, "Eldur", False),
+            (3, "Rano Elden", False), (4, "Bovi's Titan", False),
+            (5, "Åsmin", False), (6, "Alm Romeo", False),
+            (7, "Kvern Kvikk", False), (8, "Lustra Modin", False),
+            (9, "Spik Otto", False)],
+        2: [(1, "Here's Johnny", False), (2, "Good as Caviar", False),
+            (3, "Iziah Zet", False), (4, "R.K.Dynamit", False),
+            (5, "Fantasy Sensation", True), (6, "Showtime Zon", False),
+            (7, "Mister Garrincha", False), (8, "Hugo Boss Shadow", False),
+            (9, "Eleven O'Clock", False), (10, "Doutdes", False),
+            (11, "Love to Know", True), (12, "Joint Chief", False)],
+        3: [(1, "Mykle Kongen", False), (2, "Madla Lynet", False),
+            (3, "Onkel Alf", False), (4, "Lykkje Torila", False),
+            (5, "Mo Mindi", False), (6, "Bjørnemyr Tix", False),
+            (7, "Nagel", False), (8, "Kuven Lennart", False)],
+        4: [(1, "Quentin de Veluwe", False), (2, "Doyle Brunson", False),
+            (3, "Tight Lines", False), (4, "I.D.Jaiyana", False),
+            (5, "Loke Worrior", False), (6, "Kurt Med K.", False),
+            (7, "Korrespondent", False), (8, "Västerbo Rockstar", False)]
+    }
+    physical = {
+        BT: {"starts": _starts(BT, {7: real_legs[1], 8: real_legs[3]}),
+             "pdf_audit_status": "MATCHED_AS_OF_SNAPSHOT"},
+        S2: {"starts": _starts(S2, {9: real_legs[2], 10: real_legs[4]}),
+             "pdf_audit_status": "MATCHED_AS_OF_SNAPSHOT"},
+    }
+    pdf = _pdf([(7, real_legs[1]), (9, real_legs[2]),
+                (8, real_legs[3]), (10, real_legs[4])])
+    audit = audit_composite_lineage(X1, _starts(X1, real_legs), pdf, physical)
+    assert audit["status"] == "MATCHED_TO_PHYSICAL_PDF_SNAPSHOTS"
+    assert [leg["runner_count"] for leg in audit["legs"]] == [9, 12, 8, 8]
+    assert sum(leg["runner_count"] for leg in audit["legs"]) == 37
+    assert [(leg["physical_meeting_id"], leg["physical_race_number"])
+            for leg in audit["legs"]] == [(BT, 7), (S2, 9), (BT, 8), (S2, 10)]
+    assert audit["bet_authorized"] is False
