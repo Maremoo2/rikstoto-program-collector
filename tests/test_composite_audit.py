@@ -1,5 +1,5 @@
 """Composite X1/V4 regression tests; fail-closed and no BET promotion."""
-from copy from collector.composite_audit import audit_composite_lineage
+from collector.composite_audit import audit_composite_lineage
 
 
 def _starts(meeting, races):
