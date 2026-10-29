@@ -24,7 +24,7 @@ from zoneinfo import ZoneInfo
 
 from .pipeline import DOMAIN, USER_AGENT, check_robots, source_allowed
 from .pdf_program import parse_extended_pdf
-from .calendar_audit import calendar_window, calendar_racedays
+from .calendar_audit import calendar_window, calendar_racedays, diagnose_calendar_response
 from .startlist_audit import reconcile_startlist
 from .homepage_schedule import homepage_racedays, schedule_comparison
 
@@ -204,6 +204,19 @@ async def request(ctx, robots, url, path: Path, log, *, binary=False):
         return None
 
 
+def calendar_source_evidence(response, day: str, url: str, request_log: list) -> dict:
+    """Attach the archived request metadata to a non-authorizing diagnosis."""
+    entry = next((item for item in reversed(request_log)
+                  if item.get("url") == url), {})
+    return {
+        **diagnose_calendar_response(response, day),
+        "source_url": url,
+        "request_status": entry.get("status", "NOT_LOGGED"),
+        "response_sha256": entry.get("sha256"),
+        "request_at_utc": entry.get("at_utc"),
+    }
+
+
 def extract_pdf(binary: bytes, folder: Path):
     try:
         from pypdf import PdfReader
@@ -247,6 +260,8 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
         "purpose": "public program and scratches morning snapshot",
         "discoveries": [], "meetings": [], "requests": logs, "warnings": warnings,
         "status": "REVIEW_REQUIRED", "completeness_verified": False,
+        "calendar_source_diagnostic": {
+            "status": "SOURCE_NOT_REQUESTED", "date_coverage_verified": False},
         "note": "A 07:00 snapshot is not a final scratch list or closing-odds snapshot.",
     }
     try:
@@ -308,8 +323,10 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
                 for url, label in sources:
                     data = await request(ctx, robots, url, folder / f"discovery_{label}.json", logs)
                     ids = meeting_ids(data, day) if data is not None else []
-                    if label == "calendar" and data is not None:
+                    if label == "calendar":
                         calendar_entries = calendar_racedays(data, day)
+                        manifest["calendar_source_diagnostic"] = calendar_source_evidence(
+                            data, day, url, logs)
                     if label == "racedays" and data is not None:
                         direct_racedays = calendar_racedays(data, day)
                     manifest["discoveries"].append({"source": label, "url": url,
@@ -323,7 +340,11 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
                 manifest["schedule_comparison"] = schedule_comparison(
                     set(meeting_set), embedded_home, direct_racedays, calendar_entries)
                 if not calendar_entries:
+                    # Keep the legacy warning for downstream readers while
+                    # exposing the precise observed failure mode separately.
                     warnings.append("DATE_RANGE_API_NO_TARGET_MEETINGS")
+                    warnings.append(
+                        "DATE_RANGE_API_" + manifest["calendar_source_diagnostic"]["status"])
                 if not embedded_home["meetings"] and not direct_racedays and not calendar_entries:
                     warnings.append("NO_STRUCTURED_RACEDAYS_BASELINE_AVAILABLE")
                 if manifest["schedule_comparison"]["missing_from_collector"]:
