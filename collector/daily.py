@@ -24,8 +24,9 @@ from zoneinfo import ZoneInfo
 
 from .pipeline import DOMAIN, USER_AGENT, check_robots, source_allowed
 from .pdf_program import parse_extended_pdf
-from .calendar_audit import calendar_window, calendar_racedays
+from .calendar_audit import calendar_window, calendar_racedays, diagnose_calendar_response
 from .startlist_audit import reconcile_startlist
+from .composite_audit import audit_composite_lineage
 from .homepage_schedule import homepage_racedays, schedule_comparison
 
 OSLO = ZoneInfo("Europe/Oslo")
@@ -204,6 +205,19 @@ async def request(ctx, robots, url, path: Path, log, *, binary=False):
         return None
 
 
+def calendar_source_evidence(response, day: str, url: str, request_log: list) -> dict:
+    """Attach the archived request metadata to a non-authorizing diagnosis."""
+    entry = next((item for item in reversed(request_log)
+                  if item.get("url") == url), {})
+    return {
+        **diagnose_calendar_response(response, day),
+        "source_url": url,
+        "request_status": entry.get("status", "NOT_LOGGED"),
+        "response_sha256": entry.get("sha256"),
+        "request_at_utc": entry.get("at_utc"),
+    }
+
+
 def extract_pdf(binary: bytes, folder: Path):
     try:
         from pypdf import PdfReader
@@ -247,6 +261,8 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
         "purpose": "public program and scratches morning snapshot",
         "discoveries": [], "meetings": [], "requests": logs, "warnings": warnings,
         "status": "REVIEW_REQUIRED", "completeness_verified": False,
+        "calendar_source_diagnostic": {
+            "status": "SOURCE_NOT_REQUESTED", "date_coverage_verified": False},
         "note": "A 07:00 snapshot is not a final scratch list or closing-odds snapshot.",
     }
     try:
@@ -269,6 +285,7 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
                     (f"https://{DOMAIN}/api/racedays/multiTracks", "multitracks"),
                 ]
                 meeting_set = set()
+                starts_by_meeting = {}
                 calendar_entries = {}
                 direct_racedays = {}
                 embedded_home = {"status": "NOT_PRESENT", "meetings": {}, "api_path": None}
@@ -308,8 +325,10 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
                 for url, label in sources:
                     data = await request(ctx, robots, url, folder / f"discovery_{label}.json", logs)
                     ids = meeting_ids(data, day) if data is not None else []
-                    if label == "calendar" and data is not None:
+                    if label == "calendar":
                         calendar_entries = calendar_racedays(data, day)
+                        manifest["calendar_source_diagnostic"] = calendar_source_evidence(
+                            data, day, url, logs)
                     if label == "racedays" and data is not None:
                         direct_racedays = calendar_racedays(data, day)
                     manifest["discoveries"].append({"source": label, "url": url,
@@ -323,7 +342,11 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
                 manifest["schedule_comparison"] = schedule_comparison(
                     set(meeting_set), embedded_home, direct_racedays, calendar_entries)
                 if not calendar_entries:
+                    # Keep the legacy warning for downstream readers while
+                    # exposing the precise observed failure mode separately.
                     warnings.append("DATE_RANGE_API_NO_TARGET_MEETINGS")
+                    warnings.append(
+                        "DATE_RANGE_API_" + manifest["calendar_source_diagnostic"]["status"])
                 if not embedded_home["meetings"] and not direct_racedays and not calendar_entries:
                     warnings.append("NO_STRUCTURED_RACEDAYS_BASELINE_AVAILABLE")
                 if manifest["schedule_comparison"]["missing_from_collector"]:
@@ -357,6 +380,8 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
                     base = f"https://{DOMAIN}"
                     starts_url = f"{base}/api/racedays/{meeting}/starts"
                     starts = await request(ctx, robots, starts_url, mdir / "starts.json", logs)
+                    if starts is not None:
+                        starts_by_meeting[meeting] = starts
                     if starts is None:
                         record["scratching_status"] = "SOURCE_UNAVAILABLE"
                         warnings.append(f"STARTS_UNAVAILABLE:{meeting}")
@@ -475,6 +500,35 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
                                   f"{base}/api/game/program/{meeting}/driverChanges",
                                   mdir / "driver_changes.json", logs)
                     record["captured_utc"] = utcnow()
+            # Link X1 product legs to uniquely identified physical races
+            # using full-field names, numbers and scratch flags; neither
+            # same-provider agreement nor PDF matching authorizes BET.
+            physical_sources = {
+                item["meeting_id"]: {
+                    "starts": starts_by_meeting.get(item["meeting_id"]),
+                    "pdf_audit_status": item.get("startlist_pdf_audit", {}).get("status"),
+                }
+                for item in manifest["meetings"] if not item["is_multi_track_product"]
+            }
+            for item in manifest["meetings"]:
+                if not item["is_multi_track_product"]:
+                    continue
+                meeting = item["meeting_id"]
+                composite_pdf_file = folder / "meetings" / meeting / "structured_program.json"
+                composite_pdf_races = None
+                if composite_pdf_file.is_file():
+                    try:
+                        composite_pdf_races = json.loads(
+                            composite_pdf_file.read_text(encoding="utf-8")).get("races")
+                    except (OSError, ValueError, TypeError):
+                        pass
+                audit = audit_composite_lineage(
+                    meeting, starts_by_meeting.get(meeting),
+                    composite_pdf_races, physical_sources)
+                item["composite_physical_audit"] = audit
+                dump(folder / "meetings" / meeting / "composite_physical_lineage.json", audit)
+                if audit["status"] != "MATCHED_TO_PHYSICAL_PDF_SNAPSHOTS":
+                    warnings.append(f"COMPOSITE_PHYSICAL_LINEAGE_UNVERIFIED:{meeting}")
             if not manifest["meetings"]:
                 warnings.append("NO_PROGRAMS_ARCHIVED")
             elif any(r["program_pdf"] != "PDF_TEXT_OK" for r in manifest["meetings"]):
