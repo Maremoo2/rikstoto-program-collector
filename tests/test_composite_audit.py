@@ -1,7 +1,5 @@
 """Composite X1/V4 regression tests; fail-closed and no BET promotion."""
-from copy import deepcopy
-
-from collector.composite_audit import audit_composite_lineage
+from copy from collector.composite_audit import audit_composite_lineage
 
 
 def _starts(meeting, races):
@@ -31,11 +29,11 @@ S2 = "S2_NR_2026-10-29"
 PHYSICAL = {
     BT: {
         7: [(1, "Silkesvarta", False), (2, "Eldur", False)],
-        8: [(1, "Mykle Kongen", False), (2, "Horse B", False)],
+        8: [(1, "Mykle Kongen", False), (2, "Madla Lynet", False)],
     },
     S2: {
         9: [(1, "Here's Johnny", False), (5, "Fantasy Sensation", True)],
-        10: [(1, "Quentin de Veluwe", False), (2, "Horse D", False)],
+        10: [(1, "Quentin de Veluwe", False), (2, "Doyle Brunson", False)],
     },
 }
 COMPOSITE = {
