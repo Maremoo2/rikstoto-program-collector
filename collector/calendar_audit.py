@@ -66,7 +66,8 @@ def calendar_racedays(response: object, day: str) -> dict[str, dict]:
     caller from the archived request record.
     """
     date.fromisoformat(day)
-    rows_seen = target_day_rows = invalid_rows = duplicate_target_keys = 0\n    target_keys = set()
+    rows_seen = target_day_rows = invalid_rows = duplicate_target_keys = 0
+    target_keys = set()
     if response is None:
         status = "SOURCE_UNAVAILABLE"
     elif not isinstance(response, dict):
