@@ -30,6 +30,7 @@ def calendar_racedays(response: object, day: str) -> dict[str, dict]:
     if not isinstance(rows, list):
         return {}
     found = {}
+    duplicates = set()
     for row in rows:
         if not isinstance(row, dict):
             continue
@@ -37,6 +38,9 @@ def calendar_racedays(response: object, day: str) -> dict[str, dict]:
         if not isinstance(key, str) or not DAY_KEY.fullmatch(key):
             continue
         if not key.endswith("_" + day):
+            continue
+        if key in found:
+            duplicates.add(key)
             continue
         races = row.get("races") or []
         numbers = sorted({item["raceNumber"] for item in races
@@ -52,10 +56,7 @@ def calendar_racedays(response: object, day: str) -> dict[str, dict]:
             "start_time": row.get("startTime"),
             "source": "official_calendar_raceDayKey",
         }
-    return found
-
-
-def diagnose_calendar_response(response: object, day: str) -> dict[str, object]:
+    # Repeated official keys can disagree on track, scratches or race list.\n    # Do not silently pick the first or last occurrence as authoritative.\n    for key in duplicates:\n        found.pop(key, None)\n    return found\n\n\ndef diagnose_calendar_response(response: object, day: str) -> dict[str, object]:
     """Classify the *observed* date API response, never certify date coverage.
 
     A successful HTTP request may return an empty result even when the
@@ -65,7 +66,7 @@ def diagnose_calendar_response(response: object, day: str) -> dict[str, object]:
     caller from the archived request record.
     """
     date.fromisoformat(day)
-    rows_seen = target_day_rows = invalid_rows = 0
+    rows_seen = target_day_rows = invalid_rows = duplicate_target_keys = 0\n    target_keys = set()
     if response is None:
         status = "SOURCE_UNAVAILABLE"
     elif not isinstance(response, dict):
@@ -86,7 +87,12 @@ def diagnose_calendar_response(response: object, day: str) -> dict[str, object]:
                     invalid_rows += 1
                 elif key.endswith("_" + day):
                     target_day_rows += 1
-            if invalid_rows:
+                    if key in target_keys:
+                        duplicate_target_keys += 1
+                    target_keys.add(key)
+            if duplicate_target_keys:
+                status = "DUPLICATE_TARGET_DAY_KEYS"
+            elif invalid_rows:
                 status = "ROW_SCHEMA_UNRECOGNIZED"
             elif target_day_rows:
                 status = "TARGET_DAY_ENTRIES_PRESENT"
@@ -97,5 +103,6 @@ def diagnose_calendar_response(response: object, day: str) -> dict[str, object]:
         "rows_seen": rows_seen,
         "target_day_rows": target_day_rows,
         "invalid_rows": invalid_rows,
+        "duplicate_target_keys": duplicate_target_keys,
         "date_coverage_verified": False,
     }
