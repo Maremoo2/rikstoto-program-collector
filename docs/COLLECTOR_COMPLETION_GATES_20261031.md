@@ -60,7 +60,7 @@ The following thresholds are **targets to test**, not results achieved:
 | C1 independent whole-day discovery | For defined coverage geography, >=95% of independently enumerated physical races over 14 consecutive days; 100% missing reported, composites separated | Only source-discovered 154 candidates on 3 sampled days | **UNVERIFIED** |
 | C2 immutable original capture | 100% successful NEW JSON/PDF responses have original bytes, direct SHA and independent readback (with counters for all failures) | Old 198 JSON absent; PDF 20/20; #28 staged, not deployed | **FAIL legacy; UNVERIFIED future** |
 | C3 complete physical race/field | >=98% exact official PDF + same-instant starts matches on independently enumerated eligible race candidates; 100% unresolved flags explicit | 17/17 **meeting snapshot** matches inside discovered subset, not independent date | **UNVERIFIED external denominator** |
-| C4 historical parser accuracy | 60 independently adjudicated original PDF entries (20 PARSED/20 PARTIAL/20 UNPARSEABLE), with per-field false-positive/unknown metrics, then 2 independent days | #29 original date extraction regression; no full 60-row manual truth yet | **BLOCKED DATA-003** |
+| C4 historical parser accuracy | Separate independent 30-row sealed holdout (10 PARSED/10 PARTIAL/10 UNPARSEABLE, 390 semantic fields) and preregistered parser comparison, beyond the developmental 60 rows; no false certainty for missing cells | Betting DATA-003B has 60 DEVELOPMENT rows/780 audited fields; DATA-004D localized 30/30 physical rows in 24 source PDFs, but 0/390 holdout semantic fields independently approved; #29 parser date recovery is not a row-level semantic truth | **BLOCKED independent sealed holdout** |
 | C5 physical identity | 100% eligible cross-product references uniquely linked by full field + date + printed number; all ambiguous kept quarantined | X1 composite treated separately, linkage not completely proven | **BLOCKED** |
 | C6 PIT certified | 90% of eligible predeclared races with attestable original provider publication clock, T−4 source lineage, complete as-of active field; 100% missing blocked | no independent published-at/T−4 source evidence in these ZIPs | **BLOCKED** |
 | C7 prospective operations | 14 consecutive scheduled daily jobs, archived raw+manifest readback, no silent NOOP/coverage promotion | 3 historical sampled days; #30 pinned E2E verifies old gaps | **UNVERIFIED** |
@@ -69,6 +69,27 @@ The following thresholds are **targets to test**, not results achieved:
 satisfy them. The final completion percentage is **not computable** until
 the independently defined denominator and C0–C7 gates are established.
 An observed 100% within discovered meetings is not a whole-day percentage.
+
+
+### DATA-003B development sample versus independent holdout (cross-repo evidence)
+
+The connected `Maremoo2/Betting/docs/DATA004_DIAGNOSTIC.md` records
+an existing **DATA-003B development** set: 60 source rows split 20/20/20,
+13 fields each = 780 assessments (407 correct, 216 missing, 2 wrong,
+35 ambiguous gold, 94 unavailable gold and 26 unresolved parsed values).
+These categories must **not** be collapsed into a naive accuracy percentage.
+The sample was reused for diagnosis; it is **not an untouched validation set**.
+The versioned CSV/checksum files are described as private Project/Library
+materials, not guaranteed to be present in the Collector repository.
+
+Betting `docs/DATA004D_GEOMETRY_EVIDENCE.md` and
+`docs/DATA004E_DOUBLE_READ.md` document a separate frozen 30-row
+holdout (10/10/10) and 24 original PDF digests. All 30 physical horse-row
+locations were matched, but **0/390 semantic holdout cells have been
+independently verified**; source geometry is not a gold-labelled placing,
+time, gallop or DQ. The final 390-cell blinded double review/adjudication
+must precede any claim of historical field accuracy. None of this expands
+Collector's supported date/race/horse parsing into unverified result semantics.
 
 ## Implementation sequence without changing betting
 
