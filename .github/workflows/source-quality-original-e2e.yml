@@ -1,0 +1,87 @@
+name: P0 Original day source quality baseline (read only)
+
+on:
+  pull_request:
+    paths:
+      - 'collector/source_quality.py'
+      - 'tests/test_source_quality.py'
+      - 'collector/daily.py'
+      - '.github/workflows/source-quality-original-e2e.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  original-day-quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download original immutable daily artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/${GH_REPO}/actions/artifacts/12726250010/zip" > "${RUNNER_TEMP}/oct27.zip"
+          gh api "repos/${GH_REPO}/actions/artifacts/12877782643/zip" > "${RUNNER_TEMP}/oct29.zip"
+          gh api "repos/${GH_REPO}/actions/artifacts/13032657626/zip" > "${RUNNER_TEMP}/oct31.zip"
+      - name: Independently replay source-only metrics across original archived days
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import zipfile
+          from pathlib import Path
+          from collector.source_quality import summarize_source_quality
+
+          expected = {
+              "27": {"physical_meetings_observed": 6,
+                     "composite_meeting_refs": 1,
+                     "physical_race_candidate_rows": 51,
+                     "distinct_physical_race_keys": 51,
+                     "physical_horse_rows": 617,
+                     "physical_race_clock_unverified_midnight": 17,
+                     "physical_race_number_inferred": 1,
+                     "json_raw_receipts_legacy_unverifiable": 67,
+                     "pdf_source_receipts": 7},
+              "29": {"physical_meetings_observed": 4,
+                     "composite_meeting_refs": 1,
+                     "physical_race_candidate_rows": 34,
+                     "distinct_physical_race_keys": 34,
+                     "physical_horse_rows": 379,
+                     "physical_race_clock_unverified_midnight": 0,
+                     "physical_race_number_inferred": 1,
+                     "json_raw_receipts_legacy_unverifiable": 51,
+                     "pdf_source_receipts": 5},
+              "31": {"physical_meetings_observed": 7,
+                     "composite_meeting_refs": 1,
+                     "physical_race_candidate_rows": 69,
+                     "distinct_physical_race_keys": 69,
+                     "physical_horse_rows": 796,
+                     "physical_race_clock_unverified_midnight": 12,
+                     "physical_race_number_inferred": 4,
+                     "json_raw_receipts_legacy_unverifiable": 80,
+                     "pdf_source_receipts": 8},
+          }
+          for day, expected_fields in expected.items():
+              with zipfile.ZipFile(Path(os.environ["RUNNER_TEMP"]) / f"oct{day}.zip") as z:
+                  manifest_path = [n for n in z.namelist() if n.endswith("/manifest.json")]
+                  structured_path = [n for n in z.namelist()
+                                     if n.endswith("/structured_program_day.json")]
+                  assert len(manifest_path) == len(structured_path) == 1
+                  manifest = json.loads(z.read(manifest_path[0]))
+                  parsed = json.loads(z.read(structured_path[0]))
+              quality = summarize_source_quality(manifest, parsed["races"])
+              print(day, json.dumps(quality, ensure_ascii=False, sort_keys=True))
+              for key, want in expected_fields.items():
+                  assert quality[key] == want, (day, key, quality[key], want)
+              assert quality["physical_races_with_reconciled_meeting_snapshot"] == (
+                  expected_fields["physical_race_candidate_rows"])
+              assert quality["json_raw_receipts_verified"] == 0
+              assert quality["full_day_denominator_independently_verified"] is False
+              assert quality["pit_certified"] is False
+          PY
