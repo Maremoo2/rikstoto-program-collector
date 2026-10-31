@@ -89,3 +89,49 @@ def test_provider_404_stays_http_failure_no_raw_archive(tmp_path, monkeypatch):
     assert result is None
     assert log[0]["status"] == "HTTP_404"
     assert not path.exists()
+
+
+def test_pdf_request_layer_preserves_original_and_provenance(tmp_path, monkeypatch):
+    async def no_sleep(seconds):
+        pass
+
+    monkeypatch.setattr(daily.asyncio, "sleep", no_sleep)
+    pdf = b"%PDF-1.4\nsource bytes preserved\n"
+    log = []
+    target = tmp_path / "full_program.pdf"
+    result = asyncio.run(daily.request(
+        Context(Reply(pdf)), Robots(),
+        "https://www.rikstoto.no/api/programdownload/ProgramPdf/Utvidet/BJ_NR_2026-10-31",
+        target, log, binary=True))
+    assert result == pdf
+    assert target.read_bytes() == pdf
+    assert log[0]["status"] == "PDF_OK"
+    assert log[0]["sha256"] == hashlib.sha256(pdf).hexdigest()
+    assert log[0]["raw_readback_verified"] is True
+    assert log[0]["response_headers"]["date"] == "Sat, 31 Oct 2026 06:00:00 GMT"
+    assert log[0]["source_publication_time_attested"] is False
+
+
+def test_pdf_readback_corruption_cannot_be_pdf_ok(tmp_path, monkeypatch):
+    async def no_sleep(seconds):
+        pass
+
+    monkeypatch.setattr(daily.asyncio, "sleep", no_sleep)
+    original = Path.read_bytes
+
+    def altered(path):
+        if path.name == "full_program.pdf":
+            return b"BAD"
+        return original(path)
+
+    monkeypatch.setattr(Path, "read_bytes", altered)
+    log = []
+    target = tmp_path / "full_program.pdf"
+    result = asyncio.run(daily.request(
+        Context(Reply(b"%PDF-1.4\n")) , Robots(),
+        "https://www.rikstoto.no/api/programdownload/ProgramPdf/Utvidet/BJ_NR_2026-10-31",
+        target, log, binary=True))
+    assert result is None
+    assert log[0]["status"] == "ARCHIVE_READBACK_FAILED"
+    assert log[0]["source_type"] == "PDF"
+    assert not any(x["status"] == "PDF_OK" for x in log)
