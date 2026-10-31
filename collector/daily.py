@@ -182,6 +182,10 @@ async def request(ctx, robots, url, path: Path, log, *, binary=False):
                 return None
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(raw)
+            if hashlib.sha256(path.read_bytes()).hexdigest() != hashlib.sha256(raw).hexdigest():
+                log.append({"url": url, "status": "ARCHIVE_READBACK_FAILED",
+                            "source_type": "PDF", "at_utc": utcnow()})
+                return None
             log.append({"url": url, "status": "PDF_OK", "bytes": len(raw),
                         "sha256": hashlib.sha256(raw).hexdigest(),
                         "path": str(path), "at_utc": utcnow(),
@@ -189,9 +193,7 @@ async def request(ctx, robots, url, path: Path, log, *, binary=False):
                         "response_headers": {key: reply.headers[key]
                                              for key in ("date", "last-modified", "etag")
                                              if key in reply.headers},
-                        "raw_readback_verified":
-                            hashlib.sha256(path.read_bytes()).hexdigest()
-                            == hashlib.sha256(raw).hexdigest(),
+                        "raw_readback_verified": True,
                         "source_publication_time_attested": False})
             return raw
         observed_at = utcnow()
