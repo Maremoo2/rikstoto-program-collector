@@ -12,7 +12,9 @@ from typing import Any
 START = re.compile(r"START\s+KL\.?\s*(\d{1,2}:\d{2})", re.I)
 RACE = re.compile(r"\bLøp\s+(\d{1,2})\b", re.I)
 HORSE = re.compile(r"^\s*(\d{1,2})\s+([^,\n]{2,90}),\s+(.+)$")
-HISTORY = re.compile(r"\b(\d{2}\.\d{2}\.\d{2})-(\d{1,2})(?=\||\s)")
+# Official program PDFs may join the track abbreviation to the date (GEL26.08.26-5).
+# A leading word boundary would silently discard these actual history rows.
+HISTORY = re.compile(r"(\d{2}\.\d{2}\.\d{2})-(\d{1,2})(?=\||\s)")
 FOOTER = re.compile(r"\bUtvidet\s*-\s*rikstoto\.no\b", re.I)
 DISTANCE = re.compile(r"\b(\d{3,4})\s*m\s+(Voltestart|Autostart)\b", re.I)
 
