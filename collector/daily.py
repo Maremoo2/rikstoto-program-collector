@@ -181,11 +181,26 @@ async def request(ctx, robots, url, path: Path, log, *, binary=False):
             if not raw.startswith(b"%PDF-"):
                 log.append({"url": url, "status": "NOT_PDF", "content_type": ct, "at_utc": utcnow()})
                 return None
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(raw)
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(raw)
+                if hashlib.sha256(path.read_bytes()).hexdigest() != hashlib.sha256(raw).hexdigest():
+                    raise OSError("PDF_RAW_READBACK_SHA_MISMATCH")
+            except OSError as exc:
+                log.append({"url": url, "status": "ARCHIVE_READBACK_FAILED",
+                            "source_type": "PDF",
+                            "error": f"{type(exc).__name__}: {str(exc)[:200]}",
+                            "at_utc": utcnow()})
+                return None
             log.append({"url": url, "status": "PDF_OK", "bytes": len(raw),
                         "sha256": hashlib.sha256(raw).hexdigest(),
-                        "path": str(path), "at_utc": utcnow()})
+                        "path": str(path), "at_utc": utcnow(),
+                        "content_type": ct,
+                        "response_headers": {key: reply.headers[key]
+                                             for key in ("date", "last-modified", "etag")
+                                             if key in reply.headers},
+                        "raw_readback_verified": True,
+                        "source_publication_time_attested": False})
             return raw
         observed_at = utcnow()
         try:
@@ -626,8 +641,7 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
         warnings.append(f"FATAL:{type(exc).__name__}:{str(exc)[:350]}")
         manifest["status"] = "ERROR"
     finally:
-        # Diagnostic-only counters include failed/partial captures. Neither
-        # a good-looking count nor matching first-party sources certify PIT.
+        # Source-only blockers, never a complete-day or PIT certification.
         manifest["source_quality"] = summarize_source_quality(manifest, structured_races)
         dump(folder / "structured_program_day.json", {
             "date": day, "run_id": run, "source_type": "official_extended_pdf",
