@@ -89,3 +89,15 @@ def test_missing_or_invalid_clock_and_unknown_pdf_number_are_counted():
     assert r["physical_race_clock_missing_or_invalid"] == 2
     assert r["physical_race_number_unknown"] == 2
     assert r["physical_race_number_inferred"] == 0
+
+
+def test_bad_race_meeting_id_and_null_audit_never_crash_or_approve():
+    manifest = _manifest()
+    manifest["meetings"][0]["startlist_pdf_audit"] = None
+    bad_race = _race()
+    bad_race["race"]["meeting_id"] = ["BJ_NR_2026-10-31"]
+    result = summarize_source_quality(manifest, [bad_race, _race()])
+    assert result["unmapped_or_composite_race_rows"] == 1
+    assert result["physical_race_candidate_rows"] == 1
+    assert result["physical_races_with_reconciled_meeting_snapshot"] == 0
+    assert result["pit_certified"] is False
