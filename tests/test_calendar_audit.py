@@ -72,3 +72,38 @@ def test_source_reported_failure_never_yields_authoritative_calendar_entries():
     response = {"success": False, "result": [
         {"raceDayKey": "BT_NR_2026-10-29", "races": [{"raceNumber": 1}]}]}
     assert calendar_racedays(response, "2026-10-29") == {}
+
+
+def test_duplicate_official_raceday_key_is_ambiguous_not_last_wins():
+    source = {"success": True, "result": [
+        {"raceDayKey": "BT_NR_2026-10-29", "raceDayName": "Bjerke",
+         "races": [{"raceNumber": 1}]},
+        {"raceDayKey": "BT_NR_2026-10-29", "raceDayName": "Another venue",
+         "races": [{"raceNumber": 1}, {"raceNumber": 2}]},
+        {"raceDayKey": "OR_NR_2026-10-29", "raceDayName": "Varig Orkla",
+         "races": [{"raceNumber": 1}]},
+    ]}
+    entries = calendar_racedays(source, "2026-10-29")
+    assert "BT_NR_2026-10-29" not in entries
+    assert entries["OR_NR_2026-10-29"]["race_numbers"] == [1]
+    diagnostic = diagnose_calendar_response(source, "2026-10-29")
+    assert diagnostic["status"] == "DUPLICATE_TARGET_DAY_KEYS"
+    assert diagnostic["duplicate_target_keys"] == 1
+    assert diagnostic["date_coverage_verified"] is False
+
+
+def test_identical_duplicate_official_key_still_not_a_second_race():
+    row = {"raceDayKey": "BT_NR_2026-10-29", "races": [{"raceNumber": 1}]}
+    response = {"success": True, "result": [row, dict(row)]}
+    assert calendar_racedays(response, "2026-10-29") == {}
+    assert diagnose_calendar_response(response, "2026-10-29")["duplicate_target_keys"] == 1
+
+
+def test_duplicate_different_day_does_not_block_target_day():
+    response = {"result": [
+        {"raceDayKey": "BT_NR_2026-10-28", "races": []},
+        {"raceDayKey": "BT_NR_2026-10-28", "races": []},
+        {"raceDayKey": "BT_NR_2026-10-29", "races": [{"raceNumber": 1}]},
+    ]}
+    assert len(calendar_racedays(response, "2026-10-29")) == 1
+    assert diagnose_calendar_response(response, "2026-10-29")["duplicate_target_keys"] == 0
