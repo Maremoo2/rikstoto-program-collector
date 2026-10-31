@@ -56,7 +56,14 @@ def calendar_racedays(response: object, day: str) -> dict[str, dict]:
             "start_time": row.get("startTime"),
             "source": "official_calendar_raceDayKey",
         }
-    # Repeated official keys can disagree on track, scratches or race list.\n    # Do not silently pick the first or last occurrence as authoritative.\n    for key in duplicates:\n        found.pop(key, None)\n    return found\n\n\ndef diagnose_calendar_response(response: object, day: str) -> dict[str, object]:
+    # Repeated official keys can disagree on track, scratches or race list.
+    # Do not silently pick the first or last occurrence as authoritative.
+    for key in duplicates:
+        found.pop(key, None)
+    return found
+
+
+def diagnose_calendar_response(response: object, day: str) -> dict[str, object]:
     """Classify the *observed* date API response, never certify date coverage.
 
     A successful HTTP request may return an empty result even when the
