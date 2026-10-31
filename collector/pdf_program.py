@@ -10,7 +10,9 @@ from datetime import datetime
 from typing import Any
 
 START = re.compile(r"START\s+KL\.?\s*(\d{1,2}:\d{2})", re.I)
-RACE = re.compile(r"\bLøp\s+(\d{1,2})\b", re.I)
+# Rikstoto may concatenate a heading to previous text (e.g. K150Løp 7).
+# The heading scan below is restricted to the lines before START KL.
+RACE = re.compile(r"Løp\s+(\d{1,2})\b", re.I)
 HORSE = re.compile(r"^\s*(\d{1,2})\s+([^,\n]{2,90}),\s+(.+)$")
 HISTORY = re.compile(r"\b(\d{2}\.\d{2}\.\d{2})-(\d{1,2})(?=\||\s)")
 FOOTER = re.compile(r"\bUtvidet\s*-\s*rikstoto\.no\b", re.I)
