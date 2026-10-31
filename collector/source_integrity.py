@@ -37,3 +37,44 @@ def coverage_gap(*, race_date, discovered_meetings, external_cards):
             "source_ready": False,
         })
     return result
+
+
+def archive_json_bytes(raw: bytes, path, *, url: str, observed_at_utc: str):
+    """Persist exact HTTP JSON bytes alongside the legacy formatted wrapper.
+
+    Source SHA-256 is over HTTP body bytes, not the formatted wrapper. A
+    successful write requires byte-for-byte readback of both files. Old
+    archived wrappers cannot recover absent raw HTTP bytes.
+    """
+    import hashlib
+    import json
+    from pathlib import Path
+
+    if not isinstance(raw, bytes):
+        raise TypeError("Original JSON response must be bytes")
+    destination = Path(path)
+    if destination.suffix != ".json":
+        raise ValueError("JSON archive destination must end in .json")
+    value = json.loads(raw)
+    raw_path = destination.with_name(destination.stem + ".raw.json")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    raw_sha = hashlib.sha256(raw).hexdigest()
+    raw_path.write_bytes(raw)
+    if hashlib.sha256(raw_path.read_bytes()).hexdigest() != raw_sha:
+        raise OSError("RAW_JSON_READBACK_SHA_MISMATCH")
+
+    wrapper = json.dumps(
+        {"source_url": url, "fetched_utc": observed_at_utc, "response": value},
+        ensure_ascii=False, indent=2,
+    ).encode("utf-8")
+    wrapper_sha = hashlib.sha256(wrapper).hexdigest()
+    destination.write_bytes(wrapper)
+    if hashlib.sha256(destination.read_bytes()).hexdigest() != wrapper_sha:
+        raise OSError("WRAPPER_JSON_READBACK_SHA_MISMATCH")
+    return value, {
+        "raw_path": str(raw_path), "sha256": raw_sha,
+        "wrapper_sha256": wrapper_sha,
+        "raw_bytes": len(raw), "wrapper_bytes": len(wrapper),
+        "raw_readback_verified": True,
+        "source_publication_time_attested": False,
+    }

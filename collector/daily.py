@@ -28,6 +28,8 @@ from .calendar_audit import calendar_window, calendar_racedays, diagnose_calenda
 from .startlist_audit import reconcile_startlist
 from .composite_audit import audit_composite_lineage
 from .homepage_schedule import homepage_racedays, schedule_comparison
+from .source_integrity import archive_json_bytes
+from .source_quality import summarize_source_quality
 
 OSLO = ZoneInfo("Europe/Oslo")
 MEETING_ID = re.compile(r"\b[A-Z0-9]{1,14}_[A-Z]{2,4}_(20\d{2}-\d{2}-\d{2})\b", re.I)
@@ -179,22 +181,47 @@ async def request(ctx, robots, url, path: Path, log, *, binary=False):
             if not raw.startswith(b"%PDF-"):
                 log.append({"url": url, "status": "NOT_PDF", "content_type": ct, "at_utc": utcnow()})
                 return None
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(raw)
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(raw)
+                if hashlib.sha256(path.read_bytes()).hexdigest() != hashlib.sha256(raw).hexdigest():
+                    raise OSError("PDF_RAW_READBACK_SHA_MISMATCH")
+            except OSError as exc:
+                log.append({"url": url, "status": "ARCHIVE_READBACK_FAILED",
+                            "source_type": "PDF",
+                            "error": f"{type(exc).__name__}: {str(exc)[:200]}",
+                            "at_utc": utcnow()})
+                return None
             log.append({"url": url, "status": "PDF_OK", "bytes": len(raw),
                         "sha256": hashlib.sha256(raw).hexdigest(),
-                        "path": str(path), "at_utc": utcnow()})
+                        "path": str(path), "at_utc": utcnow(),
+                        "content_type": ct,
+                        "response_headers": {key: reply.headers[key]
+                                             for key in ("date", "last-modified", "etag")
+                                             if key in reply.headers},
+                        "raw_readback_verified": True,
+                        "source_publication_time_attested": False})
             return raw
+        observed_at = utcnow()
         try:
-            value = json.loads(raw)
+            value, proof = archive_json_bytes(
+                raw, path, url=url, observed_at_utc=observed_at)
         except (ValueError, UnicodeError):
             log.append({"url": url, "status": "NOT_JSON", "content_type": ct,
-                        "bytes": len(raw), "at_utc": utcnow()})
+                        "bytes": len(raw), "at_utc": observed_at})
             return None
-        dump(path, {"source_url": url, "fetched_utc": utcnow(), "response": value})
+        except (OSError, TypeError) as exc:
+            log.append({"url": url, "status": "ARCHIVE_READBACK_FAILED",
+                        "error": f"{type(exc).__name__}: {str(exc)[:200]}",
+                        "at_utc": observed_at})
+            return None
         log.append({"url": url, "status": "JSON_OK", "bytes": len(raw),
-                    "sha256": hashlib.sha256(raw).hexdigest(),
-                    "path": str(path), "at_utc": utcnow()})
+                    "path": str(path), "at_utc": observed_at,
+                    "content_type": ct,
+                    "response_headers": {key: reply.headers[key]
+                                         for key in ("date", "last-modified", "etag")
+                                         if key in reply.headers},
+                    **proof})
         return value
     except StopCollection:
         raise
@@ -214,6 +241,9 @@ def calendar_source_evidence(response, day: str, url: str, request_log: list) ->
         "source_url": url,
         "request_status": entry.get("status", "NOT_LOGGED"),
         "response_sha256": entry.get("sha256"),
+        "raw_response_path": entry.get("raw_path"),
+        "raw_readback_verified": entry.get("raw_readback_verified") is True,
+        "source_publication_time_attested": False,
         "request_at_utc": entry.get("at_utc"),
     }
 
@@ -611,6 +641,8 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
         warnings.append(f"FATAL:{type(exc).__name__}:{str(exc)[:350]}")
         manifest["status"] = "ERROR"
     finally:
+        # Source-only blockers, never a complete-day or PIT certification.
+        manifest["source_quality"] = summarize_source_quality(manifest, structured_races)
         dump(folder / "structured_program_day.json", {
             "date": day, "run_id": run, "source_type": "official_extended_pdf",
             "races": structured_races, "counts": {

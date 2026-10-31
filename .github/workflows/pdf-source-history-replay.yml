@@ -1,0 +1,69 @@
+name: P0 Original attached-date history replay (read only)
+
+on:
+  pull_request:
+    paths:
+      - 'collector/pdf_program.py'
+      - 'tests/test_pdf_joined_history_real_sources.py'
+      - '.github/workflows/pdf-source-history-replay.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  original-pdf-history-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download pinned Oct 27 original archival PDF
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/${GH_REPO}/actions/artifacts/12726250010/zip" > "${RUNNER_TEMP}/oct27.zip"
+      - name: Full original PDF-text German history reconstruction
+        run: |
+          python - <<'PY'
+          import hashlib
+          import os
+          import zipfile
+          from pathlib import Path
+          from collector.pdf_program import parse_extended_pdf
+
+          archive = Path(os.environ["RUNNER_TEMP"]) / "oct27.zip"
+          meeting = "F2_NR_2026-10-27"
+          with zipfile.ZipFile(archive) as z:
+              txt = [x for x in z.namelist()
+                     if x.endswith(f"/meetings/{meeting}/full_program.txt")]
+              assert len(txt) == 1
+              source = txt[0]
+              body = z.read(source).decode("utf-8")
+              assert hashlib.sha256(
+                  z.read(source.replace("full_program.txt", "full_program.pdf"))
+              ).hexdigest() == "1cd2d2dee7dc29ca53c11d851bf09cac37a6ae95ebea5c0d37128707fb040797"
+          report = parse_extended_pdf(
+              body, meeting_id=meeting, date="2026-10-27",
+              url="source-archive:12726250010",
+              captured_at="2026-10-27T10:16:35+00:00")
+          prior = [start for race in report["races"]
+                   for horse in race["entrants"]
+                   for start in horse["past_starts"]]
+          print("original F2 German PDF", report["qa"],
+                "recovered date/race rows", len(prior))
+          # Original 27 Oct extraction included 69 horse headers and 263
+          # date/race patterns. This is a *candidate extraction* check,
+          # NOT independent adjudication of each earlier start.
+          assert report["qa"]["race_sections"] == 7
+          assert report["qa"]["horses"] == 69
+          assert len(prior) >= 200, len(prior)
+          assert any(start["date"] == "2026-08-26"
+                     and start["race_number"] == 5 for start in prior)
+          assert all(start["placing"] is None and
+                     start["kilometre_time"] is None for start in prior)
+          assert report["qa"]["status"] == "REVIEW_REQUIRED"
+          PY

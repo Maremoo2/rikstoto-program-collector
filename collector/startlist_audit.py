@@ -42,6 +42,13 @@ def reconcile_startlist(pdf_races: list[dict[str, Any]], source: Any,
                    if isinstance(k, str) and k.isdigit()
                    and 1 <= int(k) <= 30 and isinstance(value, list)}
     pdf_race_numbers = {d["race"]["race_number"] for d in pdf_races}
+    if len(pdf_race_numbers) != len(pdf_races):
+        audit["mismatches"].append({
+            "code": "DUPLICATE_PHYSICAL_PDF_RACE_NUMBER",
+            "pdf_race_rows": len(pdf_races),
+            "distinct_pdf_numbers": len(pdf_race_numbers),
+        })
+        return audit
     audit["race_numbers_match"] = bool(known_races and pdf_race_numbers == known_races)
     if not audit["race_numbers_match"]:
         audit["mismatches"].append({
@@ -50,6 +57,12 @@ def reconcile_startlist(pdf_races: list[dict[str, Any]], source: Any,
         })
     for doc in pdf_races:
         race_no = doc["race"]["race_number"]
+        # A race number invented from PDF section order is not an original
+        # physical-race identity, even if it coincidentally matches the API.
+        if doc["race"].get("race_number_source") == "pdf_order_inferred":
+            audit["mismatches"].append({
+                "code": "PDF_PHYSICAL_RACE_NUMBER_INFERRED", "race": race_no})
+            continue
         rows = result.get(str(race_no))
         if not isinstance(rows, list):
             audit["mismatches"].append({"code": "RACE_NOT_IN_STARTLIST", "race": race_no})

@@ -103,3 +103,39 @@ def test_number_mismatch_diagnostics_do_not_approve_race():
     assert mismatch["missing_in_pdf_source_rows"] == [
         {"number": 3, "horse_name": "Lesja Loke", "isScratched": True}]
     assert audit["status"] == "PARTIAL_OR_UNVERIFIED"
+
+
+def test_inferred_pdf_number_cannot_approve_physical_snapshot_or_scratch():
+    race = doc()
+    race["race"]["race_number_source"] = "pdf_order_inferred"
+    result = reconcile_startlist([race], starts(), captured_at="2026-10-31T06:17:25Z")
+    assert result["status"] == "PARTIAL_OR_UNVERIFIED"
+    assert result["race_matches"] == 0
+    assert result["race_numbers_match"] is True
+    assert result["mismatches"] == [{
+        "code": "PDF_PHYSICAL_RACE_NUMBER_INFERRED", "race": 6}]
+    assert all(h["scratch_state"] == "UNVERIFIED" for h in race["entrants"])
+    assert race["qa"]["active_count"] is None
+
+
+def test_explicit_pdf_heading_remains_reconcilable():
+    race = doc()
+    race["race"]["race_number_source"] = "pdf_heading"
+    result = reconcile_startlist([race], starts())
+    assert result["status"] == "MATCHED_AS_OF_SNAPSHOT"
+    assert result["race_matches"] == 1
+
+
+def test_repeated_same_physical_pdf_race_number_is_blocked_even_when_names_match():
+    a, b = doc(), doc()
+    a["race"]["race_number_source"] = "pdf_heading"
+    b["race"]["race_number_source"] = "pdf_heading"
+    result = reconcile_startlist([a, b], starts())
+    assert result["status"] == "UNVERIFIED"
+    assert result["race_matches"] == 0
+    assert result["mismatches"] == [{
+        "code": "DUPLICATE_PHYSICAL_PDF_RACE_NUMBER",
+        "pdf_race_rows": 2, "distinct_pdf_numbers": 1,
+    }]
+    assert all(h["scratch_state"] == "UNVERIFIED"
+               for race in (a, b) for h in race["entrants"])

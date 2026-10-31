@@ -161,3 +161,60 @@ def test_dotted_initials_horse_name_JC():
                                 url="official-source", captured_at="2026-10-18T21:27:01Z")
     assert [(h["program_number"], h["name"]) for h in parsed["races"][0]["entrants"]] == [
         (5, "FEARLESS FLIER"), (6, "J.C."), (7, "ORACLE VIXI")]
+
+
+# Source-anchored heading excerpts from ORIGINAL archived Rikstoto PDFs.
+# 27 Oct X1: run 40487116264, PDF SHA256:
+# 7663dc0fdcc01e8efd6e5a173dc052059c1ca70293075ce991a5da819d8ec452
+# 31 Oct X1: run 41175937425, PDF SHA256:
+# 7b9d6533a910b72a90f12bc6eb30f6c6fe87c741de181aac959ec46f109ad36e
+# These are selected exact printed heading lines, not complete-PDF proof.
+def test_original_xpress_bjerke_gavle_joined_race_12_not_ordinal_two():
+    source_excerpt = """V4-1
+AXEL JENSENS MINNELØP Løp 11
+1609m Autostart Varmblods. AXEL JENSENS MINNELØP
+START KL. 17:16
+1 GOODBYE KISS* (IT), Christoffer Eriksson
+4-års brun v e Nad Al Sheba
+Tr: Linda Tovek
+V4-2
+STL STODIVISIONEN / RADIO METRO-LØPET - SPORTRAPP / GRUNNLAG - 15 BAK BILENLøp 12
+2600m Autostart Varmblods. STL STODIVISIONEN
+START KL. 17:38
+1 EYE TO EYE* (S), Carl Johan Jepson
+4-års brun hp e Readly Express
+Tr: David Persson
+Bjerke/Gävle 31.10.2026 Utvidet - rikstoto.no Side: 1 av 5
+"""
+    result = parse_extended_pdf(source_excerpt, meeting_id="X1_NR_2026-10-31",
+                                date="2026-10-31", url="archive:41175937425",
+                                captured_at="2026-10-31T06:17:30+00:00")
+    assert [d["race"]["race_number"] for d in result["races"]] == [11, 12]
+    assert all(d["race"]["race_number_source"] == "pdf_heading" for d in result["races"])
+    assert "RACE_NUMBER_ORDER_INFERRED" not in result["qa"]["warnings"]
+    assert "DUPLICATE_RACE_IDS" not in result["qa"]["warnings"]
+
+
+def test_original_xpress_axevalla_joined_race_7_not_ordinal_two():
+    source_excerpt = """V75-1
+Løp 5
+1609m Autostart Varmblods.
+START KL. 20:25
+1 FOLLOWTHATDREAM E.P., Driver Ab
+4-års brun h e Example
+Tr: Trainer
+V75-2
+B-tränarlopp - Ladugårdsinredes Lärlings-/Amatörserie - Omgång 15 - K150Løp 7
+2140m Voltestart B-tränarlopp - Ladugårdsinredes Lärlings-/Amatörserie
+Tillägg 20 m vid vunna 230.001 kr Pris: 40.000 kr START KL. 20:36
+1 ASTON R.C., Isabelle Arvidsson
+8-års brun v e Example
+Tr: Isabelle Arvidsson
+Bjerke/Axevalla 27.10.2026 Utvidet - rikstoto.no Side: 1 av 9
+"""
+    result = parse_extended_pdf(source_excerpt, meeting_id="X1_NR_2026-10-27",
+                                date="2026-10-27", url="archive:40487116264",
+                                captured_at="2026-10-27T10:16:30+00:00")
+    assert [d["race"]["race_number"] for d in result["races"]] == [5, 7]
+    assert all(d["race"]["race_number_source"] == "pdf_heading" for d in result["races"])
+    assert "RACE_NUMBER_ORDER_INFERRED" not in result["qa"]["warnings"]

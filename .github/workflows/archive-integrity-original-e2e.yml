@@ -1,0 +1,58 @@
+name: Original archived source integrity (read only)
+
+on:
+  pull_request:
+    paths:
+      - 'collector/archive_integrity_audit.py'
+      - 'tests/test_archive_integrity_audit.py'
+      - '.github/workflows/archive-integrity-original-e2e.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  archive-e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download immutable original GitHub Actions source artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/${GH_REPO}/actions/artifacts/12726250010/zip" > "${RUNNER_TEMP}/oct27.zip"
+          gh api "repos/${GH_REPO}/actions/artifacts/12877782643/zip" > "${RUNNER_TEMP}/oct29.zip"
+          gh api "repos/${GH_REPO}/actions/artifacts/13032657626/zip" > "${RUNNER_TEMP}/oct31.zip"
+      - name: Audit original 27, 29 and 31 Oct manifests and source bytes
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from collector.archive_integrity_audit import audit_archive_zip
+
+          # Pinned pre-fix archives must fail the raw JSON provenance criterion
+          # without conflating pretty-printed JSON wrappers with source bytes.
+          expected = {
+              "27": (7, 67, 51, 617),
+              "29": (5, 51, 34, 379),
+              "31": (8, 80, 69, 796),
+          }
+          for day, (pdfs, json_legacy, races, horses) in expected.items():
+              path = Path(os.environ["RUNNER_TEMP"]) / f"oct{day}.zip"
+              r = audit_archive_zip(path)
+              print(day, r)
+              assert not r["errors"], (day, r["errors"])
+              assert r["pdf_raw_sha_verified"] == pdfs
+              assert r["json_raw_unavailable_legacy"] == json_legacy
+              assert r["json_raw_sha_verified"] == 0
+              assert r["reported_unique_track_races"] == races
+              assert r["reported_unique_track_horses"] == horses
+              assert r["raw_provenance_complete"] is False
+              assert r["completeness_verified"] is False
+              assert r["pit_certified"] is False
+          PY
