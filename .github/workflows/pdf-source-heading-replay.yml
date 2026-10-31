@@ -1,0 +1,68 @@
+name: P0 Original Xpress PDF headings replay (read only)
+
+on:
+  pull_request:
+    paths:
+      - 'collector/pdf_program.py'
+      - 'tests/test_pdf_program.py'
+      - '.github/workflows/pdf-source-heading-replay.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  original-pdf-heading-replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download pinned original daily collector archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/${GH_REPO}/actions/artifacts/12726250010/zip" > "${RUNNER_TEMP}/oct27.zip"
+          gh api "repos/${GH_REPO}/actions/artifacts/13032657626/zip" > "${RUNNER_TEMP}/oct31.zip"
+      - name: Replay actual whole X1 source PDF texts against source PDF hash
+        run: |
+          python - <<'PY'
+          import hashlib
+          import os
+          import zipfile
+          from pathlib import Path
+          from collector.pdf_program import parse_extended_pdf
+
+          cases = (
+              (27, "2026-10-27", 7, [5, 7],
+               "7663dc0fdcc01e8efd6e5a173dc052059c1ca70293075ce991a5da819d8ec452"),
+              (31, "2026-10-31", 4, [11, 12],
+               "7b9d6533a910b72a90f12bc6eb30f6c6fe87c741de181aac959ec46f109ad36e"),
+          )
+          for day_number, day, expected_sections, first_two, expected_pdf_sha in cases:
+              archive = Path(os.environ["RUNNER_TEMP"]) / f"oct{day_number}.zip"
+              with zipfile.ZipFile(archive) as z:
+                  matches = [x for x in z.namelist()
+                             if f"/meetings/X1_NR_{day}/full_program.txt" in x]
+                  assert len(matches) == 1, matches
+                  original = matches[0]
+                  pdf_path = original.replace("full_program.txt", "full_program.pdf")
+                  assert hashlib.sha256(z.read(pdf_path)).hexdigest() == expected_pdf_sha
+                  raw_text = z.read(original).decode("utf-8")
+              parsed = parse_extended_pdf(
+                  raw_text, meeting_id=f"X1_NR_{day}", date=day,
+                  url=f"original-archive:{archive.name}/{original}",
+                  captured_at="2026-10-31T06:00:00Z")
+              assert parsed["qa"]["race_sections"] == expected_sections, parsed["qa"]
+              observed = [r["race"]["race_number"] for r in parsed["races"]]
+              sources = [r["race"]["race_number_source"] for r in parsed["races"]]
+              print(day, "printed physical numbers", observed, "provenance", sources)
+              assert observed[:2] == first_two, observed
+              assert sources[1] == "pdf_heading", sources
+              assert parsed["qa"]["status"] == "REVIEW_REQUIRED"
+              assert all("SCRATCHES_UNVERIFIED" in r["qa"]["warnings"]
+                         for r in parsed["races"])
+          PY
