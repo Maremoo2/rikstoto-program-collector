@@ -184,7 +184,15 @@ async def request(ctx, robots, url, path: Path, log, *, binary=False):
             path.write_bytes(raw)
             log.append({"url": url, "status": "PDF_OK", "bytes": len(raw),
                         "sha256": hashlib.sha256(raw).hexdigest(),
-                        "path": str(path), "at_utc": utcnow()})
+                        "path": str(path), "at_utc": utcnow(),
+                        "content_type": ct,
+                        "response_headers": {key: reply.headers[key]
+                                             for key in ("date", "last-modified", "etag")
+                                             if key in reply.headers},
+                        "raw_readback_verified":
+                            hashlib.sha256(path.read_bytes()).hexdigest()
+                            == hashlib.sha256(raw).hexdigest(),
+                        "source_publication_time_attested": False})
             return raw
         observed_at = utcnow()
         try:
