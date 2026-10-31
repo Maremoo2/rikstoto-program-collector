@@ -29,6 +29,7 @@ from .startlist_audit import reconcile_startlist
 from .composite_audit import audit_composite_lineage
 from .homepage_schedule import homepage_racedays, schedule_comparison
 from .source_integrity import archive_json_bytes
+from .source_quality import summarize_source_quality
 
 OSLO = ZoneInfo("Europe/Oslo")
 MEETING_ID = re.compile(r"\b[A-Z0-9]{1,14}_[A-Z]{2,4}_(20\d{2}-\d{2}-\d{2})\b", re.I)
@@ -625,6 +626,9 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
         warnings.append(f"FATAL:{type(exc).__name__}:{str(exc)[:350]}")
         manifest["status"] = "ERROR"
     finally:
+        # Diagnostic-only counters include failed/partial captures. Neither
+        # a good-looking count nor matching first-party sources certify PIT.
+        manifest["source_quality"] = summarize_source_quality(manifest, structured_races)
         dump(folder / "structured_program_day.json", {
             "date": day, "run_id": run, "source_type": "official_extended_pdf",
             "races": structured_races, "counts": {
