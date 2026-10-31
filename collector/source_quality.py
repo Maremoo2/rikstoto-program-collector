@@ -66,7 +66,8 @@ def summarize_source_quality(manifest: dict, races: list[dict]) -> dict:
             count["unmapped_or_composite_race_rows"] += 1
             continue
         mid, no = details.get("meeting_id"), details.get("race_number")
-        if mid not in physical or type(no) is not int or not 1 <= no <= 30:
+        if (not isinstance(mid, str) or mid not in physical
+                or type(no) is not int or not 1 <= no <= 30):
             count["unmapped_or_composite_race_rows"] += 1
             continue
         count["physical_race_candidate_rows"] += 1
@@ -86,8 +87,9 @@ def summarize_source_quality(manifest: dict, races: list[dict]) -> dict:
             count["physical_race_number_inferred"] += 1
         elif num_source not in ("pdf_heading", "pdf_heading_number"):
             count["physical_race_number_unknown"] += 1
-        if physical[mid].get("startlist_pdf_audit", {}).get(
-                "status") == "MATCHED_AS_OF_SNAPSHOT":
+        audit = physical[mid].get("startlist_pdf_audit")
+        if (isinstance(audit, dict)
+                and audit.get("status") == "MATCHED_AS_OF_SNAPSHOT"):
             count["physical_races_with_reconciled_meeting_snapshot"] += 1
 
     count["distinct_physical_race_keys"] = len(keys)
