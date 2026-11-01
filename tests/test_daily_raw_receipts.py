@@ -24,6 +24,8 @@ class Request:
         self.reply = reply
 
     async def get(self, url, **kwargs):
+        self.last_url = url
+        self.last_kwargs = kwargs
         return self.reply
 
 
@@ -209,3 +211,30 @@ def test_corrupt_first_pdf_write_never_creates_valid_original_receipt(tmp_path, 
     assert records[0]["status"] == "ARCHIVE_READBACK_FAILED"
     assert "PDF_READBACK_SHA_MISMATCH" in records[0]["error"]
     assert not path.exists()
+
+
+
+def test_official_source_get_refuses_redirect_before_body_or_receipt(tmp_path, monkeypatch):
+    async def no_sleep(seconds):
+        pass
+
+    monkeypatch.setattr(daily.asyncio, "sleep", no_sleep)
+    url = "https://www.rikstoto.no/api/racedays/TEST_NR_2026-10-31/starts"
+    for binary, suffix, payload in (
+        (False, "starts.json", b'{"success":true,"result":{}}'),
+        (True, "program.pdf", b"%PDF-1.4\nFAKE_REDIRECT_BODY"),
+    ):
+        context = Context(Reply(payload, status=302))
+        messages = []
+        path = tmp_path / suffix
+        result = asyncio.run(daily.request(
+            context, Robots(), url, path, messages, binary=binary,
+        ))
+        assert result is None
+        assert context.request.last_url == url
+        assert context.request.last_kwargs["max_redirects"] == 0
+        assert messages[0]["status"] == "HTTP_302"
+        assert not path.exists()
+        assert not (tmp_path / "starts.raw.json").exists()
+        assert not any(x["status"] in ("JSON_OK", "PDF_OK") for x in messages)
+
