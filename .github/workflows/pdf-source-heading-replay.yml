@@ -116,3 +116,84 @@ jobs:
           print("ORIGINAL_OVREVOLL_2026_11_01_RECONCILED_AS_OF_SNAPSHOT",
                 numbers, audit["horses_verified"])
           PY
+
+      - name: Replay all six Nov 1 physical meetings against original PDF and startlists
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/${GH_REPO}/actions/artifacts/13072403701/zip" > "${RUNNER_TEMP}/nov01-all.zip"
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import zipfile
+          from pathlib import Path
+          from collector.pdf_program import parse_extended_pdf
+          from collector.startlist_audit import reconcile_startlist
+
+          with zipfile.ZipFile(Path(os.environ["RUNNER_TEMP"]) / "nov01-all.zip") as z:
+              names = set(z.namelist())
+              manifests = [p for p in names if p.endswith("/manifest.json")]
+              assert len(manifests) == 1
+              manifest_bytes = z.read(manifests[0])
+              assert hashlib.sha256(manifest_bytes).hexdigest() == (
+                  "9e3e5731e05b51b34593033d9a958faa5be10496f7423e32bc3a1ca788438751"
+              )
+              manifest = json.loads(manifest_bytes)
+              assert manifest["date_oslo"] == "2026-11-01"
+              all_meetings = manifest["meetings"]
+              physical = [m for m in all_meetings
+                          if m["is_multi_track_product"] is False]
+              composite = [m for m in all_meetings
+                           if m["is_multi_track_product"] is True]
+              assert len(physical) == 6 and len(composite) == 1
+              pdf_receipts = {
+                  r["path"]: r["sha256"] for r in manifest["requests"]
+                  if r.get("status") == "PDF_OK"
+              }
+              race_keys = set()
+              total_horses = 0
+              matched_races = 0
+              for meeting in physical:
+                  mid = meeting["meeting_id"]
+                  path_prefix = manifests[0].rsplit("/", 1)[0]
+                  base = f"{path_prefix}/meetings/{mid}"
+                  pdf_path = base + "/full_program.pdf"
+                  text_path = base + "/full_program.txt"
+                  starts_path = base + "/starts.json"
+                  assert all(x in names for x in (pdf_path, text_path, starts_path)), mid
+                  pdf = z.read(pdf_path)
+                  assert pdf.startswith(b"%PDF-")
+                  assert hashlib.sha256(pdf).hexdigest() == pdf_receipts[pdf_path]
+                  starts = json.loads(z.read(starts_path))
+                  assert starts["response"]["success"] is True, mid
+                  parsed = parse_extended_pdf(
+                      z.read(text_path).decode("utf-8"), meeting_id=mid,
+                      date="2026-11-01",
+                      url=f"original-archive:13072403701/{pdf_path}",
+                      captured_at=starts["fetched_utc"])
+                  audit = reconcile_startlist(
+                      parsed["races"], starts["response"],
+                      captured_at=starts["fetched_utc"])
+                  assert audit["status"] == "MATCHED_AS_OF_SNAPSHOT", (mid, audit)
+                  assert audit["race_matches"] == len(parsed["races"]), mid
+                  assert audit["horses_verified"] == sum(
+                      len(r["entrants"]) for r in parsed["races"]), mid
+                  for race in parsed["races"]:
+                      key = (mid, race["race"]["race_number"])
+                      assert key not in race_keys, key
+                      race_keys.add(key)
+                  matched_races += audit["race_matches"]
+                  total_horses += audit["horses_verified"]
+                  print("PHYSICAL_MEETING_SOURCE_RECONCILED", mid,
+                        audit["race_matches"], audit["horses_verified"])
+              assert len(race_keys) == matched_races == 56
+              assert total_horses == 605, total_horses
+              # Full observed day sample != all races scheduled in the world
+              # and no capture/fetch time proves original provider publication.
+              assert manifest["completeness_verified"] is False
+              assert manifest["status"] == "REVIEW_REQUIRED"
+              assert manifest["calendar_source_diagnostic"]["status"] == "EMPTY_RESULT_ARRAY"
+              print("SIX_PHYSICAL_MEETING_SOURCE_REPLAY_PASS", matched_races, total_horses)
+          PY
