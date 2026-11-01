@@ -1,0 +1,97 @@
+name: P0 Original Marseille Joined Footer E2E (read only)
+
+on:
+  pull_request:
+    paths:
+      - 'collector/pdf_program.py'
+      - 'tests/test_pdf_program.py'
+      - '.github/workflows/pdf-original-marseille-footer-e2e.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  original-marseille:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install original capture-time PDF extractor
+        run: python -m pip install 'pypdf==6.21.3'
+      - name: Download immutable 28 Oct original PDF archive
+        env:
+          GH_TOKEN: \${{ github.token }}
+          GH_REPO: \${{ github.repository }}
+        run: |
+          gh api "repos/\${GH_REPO}/actions/artifacts/12796602126/zip" > "\${RUNNER_TEMP}/oct28-original.zip"
+      - name: Replay original PDF SHA, extraction, startlist and exact source date
+        run: |
+          python - <<'PY'
+          import hashlib
+          import io
+          import json
+          import os
+          import zipfile
+          from pathlib import Path
+          from pypdf import PdfReader
+          from collector.pdf_program import parse_extended_pdf
+          from collector.startlist_audit import reconcile_startlist
+
+          archive = Path(os.environ["RUNNER_TEMP"]) / "oct28-original.zip"
+          key, day = "F3_NR_2026-10-28", "2026-10-28"
+          with zipfile.ZipFile(archive) as z:
+              files = z.namelist()
+              manifests = [n for n in files if n.endswith("/manifest.json")]
+              assert len(manifests) == 1
+              raw_manifest = z.read(manifests[0])
+              assert hashlib.sha256(raw_manifest).hexdigest() == (
+                  "6283f7695f9fba5aa5609f882bfedda02b0a4b2f046962c72c5b26a480d25543"
+              )
+              manifest = json.loads(raw_manifest)
+              assert manifest["date_oslo"] == day
+              prefix = manifests[0].rsplit("/", 1)[0] + "/meetings/" + key
+              pdf_name, text_name, starts_name = (
+                  prefix + "/full_program.pdf",
+                  prefix + "/full_program.txt",
+                  prefix + "/starts.json",
+              )
+              pdf = z.read(pdf_name)
+              assert hashlib.sha256(pdf).hexdigest() == (
+                  "5b158d84ac5b7ada416fcfc1f3ed8bfa525802fb4556e993861930d7699c18ff"
+              )
+              raw = "\n\n".join(
+                  page.extract_text() or "" for page in PdfReader(io.BytesIO(pdf)).pages
+              )
+              assert raw == z.read(text_name).decode("utf-8")
+              assert "Marseille Pont De Vivaux28.10.2026 Utvidet" in raw
+              starts = json.loads(z.read(starts_name))
+              assert starts["response"]["success"] is True
+              parsed = parse_extended_pdf(
+                  raw, meeting_id=key, date=day,
+                  url="original-archive:12796602126/" + pdf_name,
+                  captured_at=starts["fetched_utc"],
+                  track="Marseille Pont De Vivaux",
+              )
+              print("F3_ORIGINAL_PARSER_QA", parsed["qa"])
+              assert parsed["qa"]["document_date"] == day
+              assert parsed["qa"]["race_sections"] == 8
+              assert [r["race"]["race_number"] for r in parsed["races"]] == list(range(1, 9))
+              assert parsed["qa"]["status"] == "REVIEW_REQUIRED"
+              assert all(
+                  "SCRATCHES_UNVERIFIED" in r["qa"]["warnings"]
+                  for r in parsed["races"]
+              )
+              audit = reconcile_startlist(
+                  parsed["races"], starts["response"],
+                  captured_at=starts["fetched_utc"],
+              )
+              print("F3_ORIGINAL_STARTLIST_QA", audit)
+              print("F3_RECOVERED_HORSES", parsed["qa"]["horses"])
+              assert parsed["qa"]["horses"] > 0
+              assert manifest["status"] == "REVIEW_REQUIRED"
+              assert manifest["completeness_verified"] is False
+          PY
