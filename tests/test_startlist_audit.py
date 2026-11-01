@@ -6,7 +6,7 @@ from collector.startlist_audit import (
 
 
 def doc():
-    return {"race": {"race_number": 6},
+    return {"race": {"race_number": 6, "race_number_source": "pdf_heading"},
             "entrants": [
                 {"program_number": 1, "name": "Skjetne Lara",
                  "scratched": False, "scratch_state": "UNVERIFIED"},
@@ -338,3 +338,52 @@ def test_all_runner_scratched_anomaly_does_not_confirm_scratch():
     assert output["confirmed_scratches"] == 0
     assert race["qa"]["scratch_verification"] == "UNVERIFIED_ALL_RUNNERS_FLAGGED"
     assert all(h["scratched"] is None for h in race["entrants"])
+
+
+def test_unknown_pdf_race_number_source_blocks_full_field_identity():
+    race = doc()
+    race["race"].pop("race_number_source")
+    stage_unverified_positive_scratch_signals(race, [])
+    output = reconcile_startlist([race], starts())
+    assert output["status"] == "PARTIAL_OR_UNVERIFIED"
+    assert output["verified_race_numbers"] == []
+    assert output["mismatches"] == [{
+        "code": "PDF_PHYSICAL_RACE_NUMBER_SOURCE_UNVERIFIED", "race": 6,
+    }]
+    assert all(h["scratched"] is None for h in race["entrants"])
+
+
+def test_unrecognized_pdf_race_number_source_blocks_even_matching_field():
+    race = doc()
+    race["race"]["race_number_source"] = "from_api_not_pdf"
+    stage_unverified_positive_scratch_signals(race, [])
+    output = reconcile_startlist([race], starts())
+    assert output["status"] == "PARTIAL_OR_UNVERIFIED"
+    assert output["race_matches"] == 0
+    assert output["mismatches"][0]["code"] == "PDF_PHYSICAL_RACE_NUMBER_SOURCE_UNVERIFIED"
+
+
+def test_duplicate_normalized_names_never_certify_unique_horse_identity():
+    race = doc()
+    race["entrants"][1]["name"] = "SKJETNE LARA"
+    stage_unverified_positive_scratch_signals(race, [])
+    source = starts()
+    source["result"]["6"][1]["horseName"] = "Skjetne Lara"
+    output = reconcile_startlist([race], source)
+    assert output["status"] == "PARTIAL_OR_UNVERIFIED"
+    assert output["verified_race_numbers"] == []
+    assert output["confirmed_scratches"] == 0
+    assert output["mismatches"] == [{
+        "code": "AMBIGUOUS_DUPLICATE_HORSE_IDENTITY", "race": 6,
+        "normalized_names": ["skjetnelara"],
+    }]
+    assert race["qa"]["identity_verification"] == "UNVERIFIED_DUPLICATE_HORSE_NAMES"
+    assert all(h["scratched"] is None for h in race["entrants"])
+
+
+def test_distinct_original_horse_names_continue_to_verify_snapshot():
+    race = doc()
+    stage_unverified_positive_scratch_signals(race, [])
+    result = reconcile_startlist([race], starts())
+    assert result["status"] == "MATCHED_AS_OF_SNAPSHOT"
+    assert result["race_matches"] == 1
