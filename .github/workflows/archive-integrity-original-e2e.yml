@@ -28,6 +28,7 @@ jobs:
           gh api "repos/${GH_REPO}/actions/artifacts/12726250010/zip" > "${RUNNER_TEMP}/oct27.zip"
           gh api "repos/${GH_REPO}/actions/artifacts/12877782643/zip" > "${RUNNER_TEMP}/oct29.zip"
           gh api "repos/${GH_REPO}/actions/artifacts/13032657626/zip" > "${RUNNER_TEMP}/oct31.zip"
+          gh api "repos/${GH_REPO}/actions/artifacts/13072403701/zip" > "${RUNNER_TEMP}/nov01.zip"
       - name: Audit original 27, 29 and 31 Oct manifests and source bytes
         run: |
           python - <<'PY'
@@ -55,4 +56,42 @@ jobs:
               assert r["raw_provenance_complete"] is False
               assert r["completeness_verified"] is False
               assert r["pit_certified"] is False
+          PY
+
+      - name: Independently verify Nov 1 original JSON/PDF receipts (no PIT certification)
+        run: |
+          python - <<'PY'
+          import hashlib
+          import os
+          import zipfile
+          from pathlib import Path
+          from collector.archive_integrity_audit import audit_archive_zip
+
+          archive = Path(os.environ["RUNNER_TEMP"]) / "nov01.zip"
+          with zipfile.ZipFile(archive) as zipped:
+              manifest_names = [n for n in zipped.namelist() if n.endswith("/manifest.json")]
+              assert len(manifest_names) == 1, manifest_names
+              manifest_sha = hashlib.sha256(zipped.read(manifest_names[0])).hexdigest()
+          assert manifest_sha == (
+              "9e3e5731e05b51b34593033d9a958faa5be10496f7423e32bc3a1ca788438751"
+          ), manifest_sha
+          report = audit_archive_zip(archive)
+          print("ORIGINAL_CAPTURE_NOV01_SOURCE_RECEIPTS", report)
+          assert report["errors"] == [], report["errors"]
+          assert report["status"] == "AUDITED_SOURCE_BYTES_UNVERIFIED_DAY"
+          assert report["date_oslo"] == "2026-11-01"
+          assert report["requests_observed"] == 80
+          assert report["json_raw_sha_verified"] == 73
+          assert report["json_wrapper_sha_verified"] == 73
+          assert report["json_raw_unavailable_legacy"] == 0
+          assert report["pdf_raw_sha_verified"] == 7
+          assert report["raw_provenance_complete"] is True
+          assert report["physical_meeting_candidates"] == 6
+          assert report["composite_meeting_refs"] == 1
+          assert report["reported_unique_track_races"] == 56
+          assert report["reported_unique_track_horses"] == 605
+          assert report["calendar_status"] == "EMPTY_RESULT_ARRAY"
+          assert report["collector_status"] == "REVIEW_REQUIRED"
+          assert report["completeness_verified"] is False
+          assert report["pit_certified"] is False
           PY
