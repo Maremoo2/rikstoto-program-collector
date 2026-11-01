@@ -18,7 +18,7 @@ X1 = "X1_NR_" + DAY
 ROOT = f"output/daily/{DAY}/{RUN}/"
 SOURCE_URL = "https://www.rikstoto.no/api/programdownload/ProgramPdf/Utvidet/"
 RAW_EXCERPT = (
-    "Lop 1\n"
+    "1\n"
     "2000 m Autostart\n"
     "Lop 1\n"
     "START KL. 12:00\n"
