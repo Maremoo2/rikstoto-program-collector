@@ -79,6 +79,10 @@ jobs:
               print("F3_ORIGINAL_PARSER_QA", parsed["qa"])
               assert parsed["qa"]["document_date"] == day
               assert parsed["qa"]["race_sections"] == 8
+              assert parsed["qa"]["horses"] == 92
+              assert parsed["qa"]["history_rows"] == 456
+              assert sum(r["race"]["scheduled_time_local"] == "00:00"
+                         for r in parsed["races"]) == 4
               assert [r["race"]["race_number"] for r in parsed["races"]] == list(range(1, 9))
               assert parsed["qa"]["status"] == "REVIEW_REQUIRED"
               assert all(
@@ -90,6 +94,9 @@ jobs:
                   captured_at=starts["fetched_utc"],
               )
               print("F3_ORIGINAL_STARTLIST_QA", audit)
+              assert audit["status"] == "MATCHED_AS_OF_SNAPSHOT", audit
+              assert audit["race_matches"] == 8
+              assert audit["horses_verified"] == 92
               print("F3_RECOVERED_HORSES", parsed["qa"]["horses"])
               assert parsed["qa"]["horses"] > 0
               assert manifest["status"] == "REVIEW_REQUIRED"
