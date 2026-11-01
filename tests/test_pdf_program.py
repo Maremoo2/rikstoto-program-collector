@@ -74,6 +74,50 @@ def test_wrong_date_is_rejected():
     assert "PDF_DATE_MISMATCH" in output["qa"]["warnings"]
 
 
+def test_original_marseille_joined_track_date_is_not_source_date_unknown():
+    # Exact layout token from the ORIGINAL 28 Oct 2026 Marseille F3 PDF,
+    # source run 40643424354, artifact 12796602126, page 1/12.
+    source = """V4-1
+TVILLING VINNER PLASS
+Prix Des Saintes Maries Løp 1
+2650m Voltestart PRIX DES SAINTES MARIES
+START KL. 16:35
+1 LEONITO STAR, J. Guelpa
+5-års h e Eugenito Du Noyer
+Tr: J. Guelpa
+2 LE DOCTOR, Th. Briand
+5-års h e Niky
+Tr: H. Neuville
+Marseille Pont De Vivaux28.10.2026 Utvidet - rikstoto.no Utskriftstidspunkt: 28.10.2026, 07:22:59 Side: 1 av 12
+"""
+    result = parse_extended_pdf(
+        source, meeting_id="F3_NR_2026-10-28", date="2026-10-28",
+        url="archive:40643424354", captured_at="2026-10-28T06:22:59+00:00",
+        track="Marseille Pont De Vivaux",
+    )
+    assert result["qa"]["document_date"] == "2026-10-28"
+    assert result["qa"]["race_sections"] == 1
+    assert result["qa"]["race_numbers"] == [1]
+    assert result["qa"]["horses"] == 2
+    assert "PDF_DATE_UNVERIFIED" not in result["qa"]["warnings"]
+
+
+def test_joined_footer_date_still_requires_exact_requested_day():
+    original = SAMPLE.replace(
+        "Varig Orkla 18.10.2026 Utvidet",
+        "Varig Orkla18.10.2026 Utvidet",
+    )
+    result = parsed(original)
+    assert result["qa"]["document_date"] == "2026-10-18"
+    assert result["qa"]["race_sections"] == 2
+    wrong = parse_extended_pdf(
+        original, meeting_id="OR_NR_2026-10-19", date="2026-10-19",
+        url="archive:sample", captured_at="2026-10-18T09:00:00Z",
+    )
+    assert wrong["qa"]["race_sections"] == 0
+    assert "PDF_DATE_MISMATCH" in wrong["qa"]["warnings"]
+
+
 def test_swedish_appended_start_markers_do_not_lose_races():
     text = """1
 Løp 1
