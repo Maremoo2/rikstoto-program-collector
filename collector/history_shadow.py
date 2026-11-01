@@ -9,12 +9,15 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import re
 import zipfile
 from datetime import date
 from pathlib import Path
 from typing import Any
+
+from pypdf import PdfReader, __version__ as PYPDF_VERSION
 
 from .pdf_program import parse_extended_pdf
 
@@ -29,6 +32,7 @@ HEX = re.compile(r"[0-9a-f]{64}\Z")
 POST = re.compile(r"\|\s*(\d{1,2})(?=\s|$)")
 DISTANCE = re.compile(r"(?<!\d)([12]\d{3}|3\d{3}|4[0-5]\d{2})(?!\d)")
 MAX_ARCHIVED_TEXT_BYTES = 12_000_000
+MAX_ORIGINAL_PDF_BYTES = 64_000_000
 
 
 def _abstentions(start: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -192,6 +196,10 @@ def replay_original_archive(
         txt_path = pdf_path[:-4] + ".txt"
         if txt_path not in paths:
             raise ValueError("Missing paired PDF text member")
+        if archive.getinfo(pdf_path).file_size > MAX_ORIGINAL_PDF_BYTES:
+            raise ValueError("Original PDF exceeds read-only size limit")
+        if archive.getinfo(txt_path).file_size > MAX_ARCHIVED_TEXT_BYTES:
+            raise ValueError("Derived PDF text exceeds read-only limit")
         original_pdf = archive.read(pdf_path)
         if hashlib.sha256(original_pdf).hexdigest() != expected_pdf_sha256:
             raise ValueError("Original PDF SHA mismatch")
@@ -199,8 +207,21 @@ def replay_original_archive(
         if len(raw_text) > MAX_ARCHIVED_TEXT_BYTES:
             raise ValueError("Derived PDF text exceeds read-only limit")
         source_text = raw_text.decode("utf-8")
-        # Original PDF bytes are checksum-attested. This source projection
-        # does not become independently attested original PDF page geometry.
+
+        # Reproduce *exactly* the default extraction in daily.extract_pdf.
+        # Matching ZIP member names and hashes do not otherwise prove that
+        # full_program.txt was extracted from these particular PDF bytes.
+        reader = PdfReader(io.BytesIO(original_pdf))
+        if not reader.pages:
+            raise ValueError("Original PDF has no extractable pages")
+        reproduced_text = "\n\n".join(
+            page.extract_text() or "" for page in reader.pages
+        )
+        reproduced_bytes = reproduced_text.encode("utf-8")
+        if reproduced_bytes != raw_text:
+            raise ValueError("ARCHIVED_PDF_TEXT_PROJECTION_MISMATCH")
+        # Reproducibility is an extractor-level check, NOT a human visual
+        # original-page/column adjudication or verified historical gold.
         shadow = build_history_shadow(
             source_text, meeting_id=meeting_id, racing_date=date_oslo,
             source_archive_sha256=archive_sha,
@@ -209,6 +230,12 @@ def replay_original_archive(
         )
         shadow["source_members"] = {"original_pdf": pdf_path, "derived_text": txt_path}
         shadow["source_bytes_sha256_verified"] = True
+        shadow["pdf_text_projection_reproduced_from_original_pdf"] = True
+        shadow["pdf_text_projection_extractor"] = "pypdf " + PYPDF_VERSION
+        shadow["pdf_text_projection_method"] = "default_extract_text_page_join_double_lf"
+        shadow["pdf_extraction_page_count"] = len(reader.pages)
+        shadow["pdf_text_reextracted_sha256"] = hashlib.sha256(reproduced_bytes).hexdigest()
+        shadow["independent_original_page_visual_review"] = False
         return shadow
 
 
