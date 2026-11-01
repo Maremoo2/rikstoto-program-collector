@@ -52,7 +52,8 @@ def write_original_bytes_once(raw: bytes, path, *, label: str) -> str:
 
     if not isinstance(raw, bytes):
         raise TypeError("Original HTTP response body must be bytes")
-    if label not in {"PDF", "RAW_JSON", "WRAPPER_JSON"}:
+    if label not in {"PDF", "RAW_JSON", "WRAPPER_JSON",
+                     "OFFICIAL_CALENDAR_HTML", "OFFICIAL_ROBOTS_TEXT"}:
         raise ValueError("Unexpected source archive kind")
     target = Path(path)
     target.parent.mkdir(parents=True, exist_ok=True)
