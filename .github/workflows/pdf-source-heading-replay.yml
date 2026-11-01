@@ -135,6 +135,7 @@ jobs:
           from pypdf import PdfReader
           from collector.pdf_program import parse_extended_pdf
           from collector.startlist_audit import reconcile_startlist
+          from collector.source_quality import summarize_source_quality
 
           with zipfile.ZipFile(Path(os.environ["RUNNER_TEMP"]) / "nov01-all.zip") as z:
               names = set(z.namelist())
@@ -159,6 +160,7 @@ jobs:
               race_keys = set()
               total_horses = 0
               matched_races = 0
+              all_parsed_races = []
               for meeting in physical:
                   mid = meeting["meeting_id"]
                   path_prefix = manifests[0].rsplit("/", 1)[0]
@@ -187,6 +189,8 @@ jobs:
                   audit = reconcile_startlist(
                       parsed["races"], starts["response"],
                       captured_at=starts["fetched_utc"])
+                  meeting["startlist_pdf_audit"] = audit  # In-memory, original ZIP untouched
+                  all_parsed_races.extend(parsed["races"])
                   if mid == "S3_NR_2026-11-01":
                       # Milano's *original* races 7/8 have 18 placeholders
                       # ("Häst 1" etc.) in BOTH PDF and public starts.
@@ -221,6 +225,14 @@ jobs:
               assert len(race_keys) == 56  # 56 parsed physical race keys
               assert matched_races == 54       # 2 Milano races remain unverified
               assert total_horses == 587       # 18 unresolved names, not 605 real IDs
+              quality = summarize_source_quality(manifest, all_parsed_races)
+              assert quality["physical_race_candidate_rows"] == 56
+              assert quality["physical_horse_rows"] == 605
+              assert quality["physical_races_with_reconciled_meeting_snapshot"] == 54
+              assert quality["physical_races_with_placeholder_identity"] == 2
+              assert quality["physical_placeholder_horse_rows"] == 18
+              assert quality["pit_certified"] is False
+              assert quality["full_day_denominator_independently_verified"] is False
               # Full observed day sample != all races scheduled in the world
               # and no capture/fetch time proves original provider publication.
               assert manifest["completeness_verified"] is False
