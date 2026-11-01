@@ -26,7 +26,7 @@ DISTANCE = re.compile(r"\b(\d{3,4})\s*m\s+(Voltestart|Autostart)\b", re.I)
 
 
 def _pdf_date(text: str) -> str | None:
-    m = re.search(r"\b(\d{2})\.(\d{2})\.(20\d{2})\s+Utvidet\s*-\s*rikstoto\.no", text)
+    # The ORIGINAL 28 Oct Marseille PDF joined the track and date as\n    # "Vivaux28.10.2026". Do not require a word boundary between letters\n    # and digits; disallow a preceding digit, and still demand the unique\n    # official four-digit date followed by the Rikstoto footer marker.\n    m = re.search(r"(?<!\d)(\d{2})\.(\d{2})\.(20\d{2})\s+Utvidet\s*-\s*rikstoto\.no", text)
     return f"{m.group(3)}-{m.group(2)}-{m.group(1)}" if m else None
 
 
