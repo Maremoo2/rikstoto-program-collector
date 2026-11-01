@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'collector/archive_integrity_audit.py'
+      - 'tests/test_archive_integrity_audit.py'
       - 'collector/source_integrity.py'
       - 'collector/daily.py'
       - 'tests/test_json_raw_archive.py'
