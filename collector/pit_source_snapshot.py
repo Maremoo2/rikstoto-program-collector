@@ -11,7 +11,6 @@ import hashlib
 import json
 import re
 import zipfile
-from collections import Counter
 from datetime import UTC, date, datetime, time, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
