@@ -82,6 +82,45 @@ The integration command returns exit code 2 intentionally because
 matching venue candidates is NOT a complete-day source denominator.
 Missing next-day captures are explicit BLOCKED, never zero races.
 
+## C6 – second implementation: multi-capture source revision chain
+
+New collector/pit_revision_chain.py uses the EXISTING
+pit_source_snapshot.audit_original_pdf_capture_tminus4 per immutable
+original ZIP. It orders individual race receipt timestamps rather than
+assuming the input ZIP order and identifies:
+- original PDF SHA changes between independent Collector runs;
+- changes to the PDF-printed racing clock across versions;
+- missing races, duplicate archives, invalid source timestamps and
+  inconsistent capture identities (all fail closed);
+- whether source observations occur around or bracket an *unverified*
+  PDF T−4 clock.
+
+This closes the code gap for a future longitudinal source version
+record. It does NOT create actual new capture archives and must never
+be interpreted as first-publication evidence, an independent actual
+start clock, a prospective as-of market/field snapshot or C6 PIT
+authorization. Every report carries tminus4_pit_certified=false.
+The original November 1 archive supplies only ONE historical morning
+source capture: C6 version-chain status must therefore be
+BLOCKED_INSUFFICIENT_SOURCE_CAPTURES, not an invented T−4 pass.
+
+The corresponding tests use independently varied synthetic receipt
+and PDF SHA evidence, and the integration CI checks the actual original
+Nov 1 archive against both the C1 calendar negative and C6 single-
+capture negative. No production collection is scheduled or edited.
+
+Private replay, if multiple ORIGINAL collector ZIP captures for the
+same Oslo race day exist:
+
+    python -m collector.pit_revision_chain --day 2026-11-01 \
+      --archive /private/run-1.zip --archive /private/run-2.zip \
+      --output /private/pit_source_version_chain.json
+
+A green source revision chain is still SOURCE_REVISION_SEQUENCE_DIAGNOSTIC_ONLY,
+not PIT certification. Independent actual start time, complete race/horse
+scope, point-in-time market and source publication still require separate
+prospective evidence.
+
 ## Evidence and unreached acceptance
 
 The synthetic negative suite tests source URL and robots protection,
