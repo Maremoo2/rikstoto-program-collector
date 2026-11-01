@@ -84,3 +84,62 @@ def test_non_json_destination_rejected(tmp_path, bad_destination):
         archive_json_bytes(b'{"a":1}', tmp_path / bad_destination,
                            url="https://www.rikstoto.no/api/racedays",
                            observed_at_utc="2026-10-31T06:00:00Z")
+
+
+
+def test_original_raw_json_and_wrapper_are_never_overwritten_on_repeat(tmp_path):
+    path = tmp_path / "starts.json"
+    initial = b'{  "first":  1 }'
+    archive_json_bytes(initial, path, url="https://www.rikstoto.no/api/racedays",
+                       observed_at_utc="2026-11-01T07:00:00+00:00")
+    before = (path.read_bytes(), (tmp_path / "starts.raw.json").read_bytes())
+    for body in (initial, b'{"second":2}'):
+        with pytest.raises(FileExistsError, match="ORIGINAL_SOURCE_ARCHIVE_COLLISION"):
+            archive_json_bytes(body, path, url="https://www.rikstoto.no/api/racedays",
+                               observed_at_utc="2026-11-01T07:01:00+00:00")
+    assert (path.read_bytes(), (tmp_path / "starts.raw.json").read_bytes()) == before
+
+
+def test_existing_wrapper_must_block_creation_of_orphan_raw_response(tmp_path):
+    path = tmp_path / "starts.json"
+    path.write_bytes(b"PREVIOUS_WRAPPER_BYTES")
+    with pytest.raises(FileExistsError, match="COLLISION"):
+        archive_json_bytes(b'{"success":true}', path, url="https://www.rikstoto.no/api/racedays",
+                           observed_at_utc="2026-11-01T07:00:00+00:00")
+    assert path.read_bytes() == b"PREVIOUS_WRAPPER_BYTES"
+    assert not (tmp_path / "starts.raw.json").exists()
+
+
+def test_existing_raw_response_must_block_wrapper_creation(tmp_path):
+    raw_path = tmp_path / "starts.raw.json"
+    raw_path.write_bytes(b"OLD_HTTP_BODY")
+    with pytest.raises(FileExistsError, match="COLLISION"):
+        archive_json_bytes(b'{"success":true}', tmp_path / "starts.json",
+                           url="https://www.rikstoto.no/api/racedays",
+                           observed_at_utc="2026-11-01T07:00:00+00:00")
+    assert raw_path.read_bytes() == b"OLD_HTTP_BODY"
+    assert not (tmp_path / "starts.json").exists()
+
+
+def test_preexisting_symlink_never_overwrites_or_follows_original(tmp_path):
+    external = tmp_path / "external.json"
+    external.write_bytes(b"PERMANENT_OLD_RECORD")
+    link = tmp_path / "starts.json"
+    link.symlink_to(external)
+    with pytest.raises(FileExistsError, match="COLLISION"):
+        archive_json_bytes(b'{"second":2}', link,
+                           url="https://www.rikstoto.no/api/racedays",
+                           observed_at_utc="2026-11-01T07:01:00+00:00")
+    assert external.read_bytes() == b"PERMANENT_OLD_RECORD"
+    assert link.is_symlink()
+
+
+def test_original_response_receipt_is_explicitly_exclusive_and_not_publication_time(tmp_path):
+    _, receipt = archive_json_bytes(
+        b'{"result":[]}', tmp_path / "day.json",
+        url="https://www.rikstoto.no/api/racedays",
+        observed_at_utc="2026-11-01T07:01:00+00:00",
+    )
+    assert receipt["original_archive_append_only_exclusive_create"] is True
+    assert receipt["raw_readback_verified"] is True
+    assert receipt["source_publication_time_attested"] is False
