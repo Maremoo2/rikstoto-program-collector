@@ -25,7 +25,8 @@ def _make(tmp_path, *, legacy=False, raw_tampered=False,
     pdf = b"%PDF-1.4\nsource-file"
     receipts = [
         {"status": "PDF_OK", "sha256": hashlib.sha256(pdf).hexdigest(),
-         "path": original_key("meetings/BJ/full_program.pdf")},
+         "path": original_key("meetings/BJ/full_program.pdf"),
+         "url": "https://www.rikstoto.no/api/programdownload/ProgramPdf/Utvidet/BJ"},
         {"status": "JSON_OK", "sha256": hashlib.sha256(raw).hexdigest(),
          "path": original_key("discovery_calendar.json")},
     ]
@@ -252,3 +253,27 @@ def test_manifest_does_not_attest_foreign_capture_path(tmp_path):
     assert result["status"] == "BLOCKED"
     assert "MANIFEST_IDENTITY_MISMATCH" in result["errors"]
     assert result["pit_certified"] is False
+
+
+def test_pdf_meeting_source_uri_must_match_archived_meeting(tmp_path):
+    """A byte-identical PDF from another meeting is not valid source proof."""
+    target = _make(tmp_path)
+    with zipfile.ZipFile(target) as original:
+        entries = {name: original.read(name) for name in original.namelist()}
+    manifest_name = next(name for name in entries if name.endswith("/manifest.json"))
+    manifest = json.loads(entries[manifest_name])
+    receipt = next(row for row in manifest["requests"]
+                   if row.get("status") == "PDF_OK")
+    own_path = receipt["path"]
+    wrong_meeting_path = own_path.replace("/meetings/BJ/", "/meetings/ST/")
+    entries[wrong_meeting_path] = entries.pop(own_path)
+    receipt["path"] = wrong_meeting_path
+    entries[manifest_name] = json.dumps(manifest).encode()
+    with zipfile.ZipFile(target, "w") as rewritten:
+        for name, body in entries.items():
+            rewritten.writestr(name, body)
+    report = audit_archive_zip(target)
+    assert report["status"] == "BLOCKED"
+    assert "PDF_SOURCE_MEETING_IDENTITY_MISMATCH" in report["errors"]
+    assert report["pdf_raw_sha_verified"] == 0
+    assert report["pit_certified"] is False
