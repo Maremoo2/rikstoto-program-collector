@@ -21,14 +21,20 @@ def _sha(payload: bytes) -> str:
 
 
 def _archive_name(name: str, names: set[str], prefix: str) -> str | None:
-    """Resolve only the two collector-owned documented ZIP layouts."""
+    """Resolve a receipt only inside the manifest's own day/run directory.
+
+    The capture ZIP may retain ``output/daily/`` while a private release ZIP
+    removes that prefix. Neither layout permits a receipt to borrow source
+    bytes from a different capture included in the same ZIP.
+    """
     if not isinstance(name, str) or not name:
         return None
-    if name in names:
-        return name
-    if name.startswith("output/daily/"):
-        candidate = name[len("output/daily/"):]
-        if candidate.startswith(prefix) and candidate in names:
+    logical = (name[len("output/daily/"):]
+               if name.startswith("output/daily/") else name)
+    if not logical.startswith(prefix) or len(logical) == len(prefix):
+        return None
+    for candidate in (name, logical, "output/daily/" + logical):
+        if candidate in names:
             return candidate
     return None
 
