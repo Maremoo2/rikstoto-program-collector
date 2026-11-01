@@ -1,0 +1,66 @@
+name: C-DEV-02 official day-plus-two negative source audit (read only)
+
+on:
+  pull_request:
+    paths:
+      - 'collector/independent_day_window.py'
+      - 'tests/test_independent_day_window.py'
+      - '.github/workflows/cdev02-independent-day-window.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  independent-day-window:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned Ruff
+        run: python -m pip install ruff==0.14.4
+      - name: Lint read-only official calendar module and synthetic negative tests
+        run: ruff check collector/independent_day_window.py tests/test_independent_day_window.py
+      - name: Pin the original Nov 1 GitHub Actions source archive (read only)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh api "repos/${GH_REPO}/actions/artifacts/13072403701/zip" > "${RUNNER_TEMP}/nov01.zip"
+      - name: Offline Nov 1 source manifest must NOT imply three-day C1 coverage
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import zipfile
+          from pathlib import Path
+          from collector.independent_day_window import audit_window
+
+          with zipfile.ZipFile(Path(os.environ["RUNNER_TEMP"]) / "nov01.zip") as archive:
+              paths = [n for n in archive.namelist() if n.endswith("/manifest.json")]
+              assert len(paths) == 1
+              body = archive.read(paths[0])
+          sha = hashlib.sha256(body).hexdigest()
+          assert sha == "9e3e5731e05b51b34593033d9a958faa5be10496f7423e32bc3a1ca788438751"
+          manifest = json.loads(body)
+          assert manifest["date_oslo"] == "2026-11-01"
+          # There are NO independent official HTTP-source bodies supplied
+          # and NO verified Collector Nov 2/3 manifest archives in this
+          # immutable fixture. The correct answer is explicit BLOCKED.
+          report = audit_window("2026-11-01", {"2026-11-01": manifest}, {})
+          print("CDEV02_ORIGINAL_NEGATIVE_WINDOW", json.dumps(report, sort_keys=True))
+          assert report["window_dates"] == [
+              "2026-11-01", "2026-11-02", "2026-11-03"]
+          assert report["days"][0]["missing_official_bundle"] is True
+          assert report["days"][1]["missing_collector_manifest"] is True
+          assert report["days"][2]["missing_collector_manifest"] is True
+          assert report["status"] == "BLOCKED_INDEPENDENT_FULL_DAY_DENOMINATOR"
+          assert report["coverage_percentage"] is None
+          assert report["independent_race_denominator_verified"] is False
+          assert report["c1_14_day_coverage_eligible"] is False
+          assert report["pit_certified"] is False
+          assert report["bet_authorized"] is False
+          PY
