@@ -31,6 +31,46 @@ def unresolved_placeholder_name(value: str) -> bool:
     ))
 
 
+def stage_unverified_positive_scratch_signals(
+    doc: dict[str, Any], events: list[dict[str, Any]],
+) -> None:
+    """Keep preliminary public flag observations separate from verified states.
+
+    Positive-only events cannot establish a horse identity, field
+    completeness, or even the identity of a scratched horse if the API
+    conflicts with the PDF. Only reconcile_startlist can authorize a
+    per-horse ACTIVE/SCRATCHED_AS_OF_SNAPSHOT state.
+    """
+    race = doc["race"]["race_number"]
+    candidates = [
+        {"race_number": event.get("race_number"),
+         "horse_number": event.get("horse_number"),
+         "horse_name": event.get("horse_name"),
+         "source_path": event.get("source_path"),
+         "evidence": event.get("evidence"),
+         "verification": "UNVERIFIED_POSITIVE_SIGNAL"}
+        for event in events
+        if isinstance(event, dict) and type(event.get("race_number")) is int
+        and event["race_number"] == race
+    ]
+    doc["scratch_signal_candidates"] = candidates
+    doc["scratches"] = []
+    for horse in doc["entrants"]:
+        horse["scratched"] = None
+        horse["scratch_state"] = "UNVERIFIED"
+        horse.pop("scratch_source", None)
+        horse.pop("scratch_captured_utc", None)
+    qa = doc["qa"]
+    qa["active_count"] = None
+    qa["scratched_count"] = None
+    qa["scratches_complete_as_of_snapshot"] = False
+    qa["scratch_verification"] = (
+        "UNVERIFIED_POSITIVE_ONLY" if candidates else "UNVERIFIED_NO_POSITIVE_SIGNAL"
+    )
+    if "SCRATCHES_UNVERIFIED" not in qa.setdefault("warnings", []):
+        qa["warnings"].append("SCRATCHES_UNVERIFIED")
+
+
 def reconcile_startlist(pdf_races: list[dict[str, Any]], source: Any,
                         *, captured_at: str | None = None) -> dict[str, Any]:
     """Mutates verified race docs only if every number/name/flag matches.
@@ -54,9 +94,22 @@ def reconcile_startlist(pdf_races: list[dict[str, Any]], source: Any,
         audit["mismatches"].append("STARTLIST_RESULT_UNRECOGNIZED")
         return audit
 
-    known_races = {int(k) for k, value in result.items()
-                   if isinstance(k, str) and k.isdigit()
-                   and 1 <= int(k) <= 30 and isinstance(value, list)}
+    # A malformed *additional* API race must not vanish from the
+    # denominator and leave a seemingly complete PDF/startlist match.
+    # Only canonical physical race-number keys with list values qualify.
+    unrecognized = sorted(
+        str(key) for key, value in result.items()
+        if not (isinstance(key, str) and key.isascii() and key.isdecimal()
+                and key == str(int(key)) and 1 <= int(key) <= 30
+                and isinstance(value, list))
+    )
+    if unrecognized:
+        audit["mismatches"].append({
+            "code": "UNRECOGNIZED_STARTLIST_RACE_KEYS",
+            "keys": unrecognized,
+        })
+        return audit
+    known_races = {int(key) for key in result}
     pdf_race_numbers = {d["race"]["race_number"] for d in pdf_races}
     if len(pdf_race_numbers) != len(pdf_races):
         audit["mismatches"].append({
@@ -93,7 +146,19 @@ def reconcile_startlist(pdf_races: list[dict[str, Any]], source: Any,
                 malformed = True
                 break
             number = item["startNumber"]
-            if number in api_horses or not isinstance(item.get("horseName"), str) or type(item.get("isScratched")) is not bool:
+            # Rows declaring an internal raceNumber must agree with the
+            # enclosing physical race key; a matching runner number alone
+            # must never override a contradictory race identity.
+            declared_race = item.get("raceNumber")
+            if declared_race is not None and (
+                type(declared_race) is not int or declared_race != race_no
+            ):
+                malformed = True
+                break
+            if (not 1 <= number <= 99 or number in api_horses
+                    or not isinstance(item.get("horseName"), str)
+                    or not normalized_horse_name(item["horseName"])
+                    or type(item.get("isScratched")) is not bool):
                 malformed = True
                 break
             api_horses[number] = item
