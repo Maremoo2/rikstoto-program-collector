@@ -143,7 +143,7 @@ def test_matching_original_pdf_sha_but_modified_text_blocks_history(tmp_path):
         "ARCHIVED_PDF_TEXT_PROJECTION_MISMATCH": 1,
     }
     assert result["history_candidate_rows_from_reproduced_text"] == 0
-    assert result["program_diagnostics"][0]["unverified_history_candidate_rows"] if False else True
+    assert "unverified_history_candidate_rows" not in result["program_diagnostics"][0]
 
 
 def test_missing_derived_text_member_explicit_not_silent_denominator(tmp_path):
