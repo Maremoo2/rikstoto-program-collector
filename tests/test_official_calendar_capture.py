@@ -360,8 +360,11 @@ def test_original_archive_calendar_day_disagreement_fails_closed(tmp_path):
     result = compare_original_three_day_sources(
         DAY, {DAY: _original_collector_archive(tmp_path, wrong_date=True)}, {})
     assert result["original_source_days_with_valid_receipts"] == 0
-    assert "ORIGINAL_ARCHIVE_DAY_DISAGREES" in result[
-        "source_evidence_by_day"][0]["original_archive_receipt_errors"]
+    # The existing Collector archive guard can reject the inconsistent
+    # manifest day/run even before the new day+2 comparator runs.
+    assert result["source_evidence_by_day"][0]["original_archive_receipt_errors"] == [
+        "MANIFEST_IDENTITY_MISMATCH"
+    ]
     assert result["c1_14_day_coverage_eligible"] is False
 
 
