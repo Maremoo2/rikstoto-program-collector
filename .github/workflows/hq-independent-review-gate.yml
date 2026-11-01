@@ -1,0 +1,51 @@
+name: P0 Independent HQ Exact Head Review Evidence (read only)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  pull_request_review:
+    types: [submitted, dismissed]
+  issue_comment:
+    types: [created, edited, deleted]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: read
+
+jobs:
+  independent-hq-review-evidence:
+    if: github.event_name != 'issue_comment' || github.event.issue.pull_request != null
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Pure offline negative approval tests
+        run: python -m pip install pytest && python -m pytest -q tests/test_hq_exact_head_review_gate.py
+      - name: Read GitHub PR, all human review pages and comments (no changes)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HQ_PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$HQ_PR_NUMBER"
+          gh api "repos/$GITHUB_REPOSITORY/pulls/$HQ_PR_NUMBER" > "$RUNNER_TEMP/hq-pr.json"
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$HQ_PR_NUMBER/reviews?per_page=100" > "$RUNNER_TEMP/hq-reviews.json"
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/issues/$HQ_PR_NUMBER/comments?per_page=100" > "$RUNNER_TEMP/hq-comments.json"
+      - name: Evaluate designated HQ reviewer, exact commit and later explicit approval note
+        env:
+          HQ_PR_NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
+          HQ_REVIEWER_LOGINS: ${{ vars.HQ_REVIEWER_LOGINS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/hq_exact_head_review_gate.py \
+            --pr "$RUNNER_TEMP/hq-pr.json" \
+            --reviews "$RUNNER_TEMP/hq-reviews.json" \
+            --comments "$RUNNER_TEMP/hq-comments.json" \
+            --repository "$GITHUB_REPOSITORY" \
+            --reviewer-logins "$HQ_REVIEWER_LOGINS"
