@@ -29,9 +29,14 @@ Original PDF source candidates for immutable read-only E2E:
   original PDF SHA-256
   `1947bc302ab59c355c8da53d078f384345e06f453fbf9a71df2b7c90a0d28ce1`.
 
-Original PDF bytes are checked against these pinned hashes on replay;
-the archived `full_program.txt` remains a **derived text projection**,
-not a cryptographically proven faithful page/column transcription.
+Original PDF bytes are checked against these pinned hashes on replay.
+C-DEV-04 now additionally reproduces the Collector `extract_pdf` method
+(default `pypdf.PdfReader(...).pages[].extract_text()`, joined with two
+newlines) directly from the original PDF bytes and requires its **UTF-8
+bytes to be identical** to archived `full_program.txt`. A mismatch is a
+hard failure: `ARCHIVED_PDF_TEXT_PROJECTION_MISMATCH`. This validates
+reproducibility under the documented installed `pypdf` version, not
+independent physical PDF page/column ownership or visual gold.
 The race-day and prior-start source dates are never backdated.
 
 ## Implemented C-DEV-04 source-only module
@@ -59,7 +64,11 @@ The race-day and prior-start source dates are never backdated.
    `data004e_holdout_390_accepted=0`,
    `production_parser_changed=false` and
    `production_parser_approved=false`.
-7. CLI only reads an already-available ZIP. It prints summary by default,
+7. Source projection proof requires actual `pypdf` extraction parity
+   against original PDF bytes; records `pdf_text_projection_reproduced_from_original_pdf`,
+   extractor version, PDF page count and SHA-256. No assertion of
+   visual source-page transcription or independently accepted labels.
+8. CLI only reads an already-available ZIP. It prints summary by default,
    or writes an explicitly requested new private local diagnostic file
    with exclusive-create mode. It cannot replace original archive bytes.
 
@@ -108,3 +117,21 @@ PDF/startlist snapshot cohort = PARTIAL (PR #47 separate);
 C4 **390 gold accepted = 0**; C5 physical alias = PARTIAL;
 C6 prospective immutable T−4 PIT = BLOCKED; C7 14 operational days = BLOCKED.
 GitHub test success is not LIVE_VERIFIED or HQ_ACCEPTED.
+
+
+## New regression boundary (C-DEV-04 original text parity)
+
+The added test fixture contains a **genuine but wholly synthetic PDF**
+generated with ReportLab and re-extracted with pypdf. Negative tests
+tamper with archived text (horse name/date) while keeping the original
+PDF SHA correct, and must fail without producing source-backed history.
+The three immutable original Odense, Gelsenkirchen and Deauville archive
+PDFs are replayed through the same byte-exact gate. Their output is
+diagnostic only: no 390-field holdout gold, no human original-page review,
+no prospective C6 timestamps and no betting-model promotion.
+
+No PDF or JSON original archive is rewritten by this work. Because the
+extractor library's behavior can change across versions, the exact
+pypdf version is retained in each successful report. Version-dependent
+mismatch fails closed until independently investigated; it must never be
+silently corrected or counted as validated history.
