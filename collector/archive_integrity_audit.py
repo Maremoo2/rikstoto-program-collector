@@ -143,6 +143,27 @@ def audit_archive_zip(archive: Path | str) -> dict:
                     report["errors"].append("MISSING_OR_INVALID_SOURCE_SHA")
                     continue
                 if status == "PDF_OK":
+                    # SHA equality proves file bytes, not that the file was
+                    # fetched for the meeting named by this archived receipt.
+                    # The source URI and meeting directory must corroborate
+                    # the same physical race-day identity.
+                    source_url = entry.get("url")
+                    source_meeting = (
+                        re.fullmatch(
+                            r"https://www[.]rikstoto[.]no/api/programdownload/"
+                            r"ProgramPdf/Utvidet/([A-Z0-9_-]+)",
+                            source_url,
+                        )
+                        if isinstance(source_url, str) else None
+                    )
+                    archived_meeting = re.search(
+                        r"/meetings/([A-Z0-9_-]+)/full_program[.]pdf\\Z",
+                        original_path,
+                    )
+                    if (source_meeting is None or archived_meeting is None
+                            or source_meeting.group(1) != archived_meeting.group(1)):
+                        report["errors"].append("PDF_SOURCE_MEETING_IDENTITY_MISMATCH")
+                        continue
                     resolved = _archive_name(entry.get("path"), file_names, prefix)
                     if not resolved:
                         report["errors"].append("PDF_ARCHIVE_PATH_MISSING")
