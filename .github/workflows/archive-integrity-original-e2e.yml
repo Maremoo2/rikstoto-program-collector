@@ -4,6 +4,10 @@ on:
   pull_request:
     paths:
       - 'collector/archive_integrity_audit.py'
+      - 'collector/source_integrity.py'
+      - 'collector/daily.py'
+      - 'tests/test_json_raw_archive.py'
+      - 'tests/test_daily_raw_receipts.py'
       - 'tests/test_archive_integrity_audit.py'
       - '.github/workflows/archive-integrity-original-e2e.yml'
 
