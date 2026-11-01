@@ -12,10 +12,11 @@ from typing import Any
 START = re.compile(r"START\s+KL\.?\s*(\d{1,2}:\d{2})", re.I)
 # Rikstoto may concatenate a heading to previous text (e.g. K150Løp 7).
 # The heading scan below is restricted to the lines before START KL.
-# Allow joined headings such as K150Løp 7, but never match a suffix of
-# 2-ÅRSLØP or a price such as "2-ÅRSLØP 81.900 kr". A race number is 1..30.
-# The Unicode-letter lookbehind permits joined numeric prefixes, not letters.
-RACE = re.compile(r"(?<![^\W\d_])Løp\s+([1-9]|[12]\d|30)\b(?![.,]\d)", re.I)
+# Source headings may join directly after digits OR letters, e.g.
+# K150Løp 7 and BILENLøp 12, so do not require a left word boundary.
+# Limit physical numbers to 1..30 and exclude decimal prize continuations
+# such as "2-ÅRSLØP 81.900 kr" or "2-ÅRSLØP 12.000 kr".
+RACE = re.compile(r"Løp\s+([1-9]|[12]\d|30)\b(?![.,]\d)", re.I)
 HORSE = re.compile(r"^\s*(\d{1,2})\s+([^,\n]{2,90}),\s+(.+)$")
 # Official program PDFs may join the track abbreviation to the date (GEL26.08.26-5).
 # A leading word boundary would silently discard these actual history rows.
