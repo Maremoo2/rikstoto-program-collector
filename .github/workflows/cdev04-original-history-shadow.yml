@@ -1,0 +1,84 @@
+name: C-DEV-04 original historical PDF shadow replay (read only)
+
+on:
+  pull_request:
+    paths:
+      - 'collector/history_shadow.py'
+      - 'tests/test_history_shadow.py'
+      - '.github/workflows/cdev04-original-history-shadow.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  original-history-shadow:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install pytest ruff==0.14.4
+      - name: Lint new Collector-only shadow code
+        run: ruff check collector/history_shadow.py tests/test_history_shadow.py
+      - name: Test negative source and abstention fixtures
+        run: python -m pytest -q tests/test_history_shadow.py tests/test_pdf_joined_history_real_sources.py tests/test_pdf_odense_ld_source.py
+      - name: Read immutable original Oct 23, Oct 27 and Oct 31 archives
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/${GH_REPO}/actions/artifacts/12480651523/zip" > "${RUNNER_TEMP}/oct23.zip"
+          gh api "repos/${GH_REPO}/actions/artifacts/12726250010/zip" > "${RUNNER_TEMP}/oct27.zip"
+          gh api "repos/${GH_REPO}/actions/artifacts/13032657626/zip" > "${RUNNER_TEMP}/oct31.zip"
+      - name: Verify original PDF SHA and replay shadow provenance only
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          from collector.history_shadow import HISTORY_GOLD_FIELDS, replay_original_archive
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          sources = [
+              ("oct23.zip", "S3_NR_2026-10-23", "2026-10-23",
+               "432e795e7ff3965804c26989ccb4f91e5fc6ef5da406415cc3b5dcf72b4e8d7c"),
+              ("oct27.zip", "F2_NR_2026-10-27", "2026-10-27",
+               "1cd2d2dee7dc29ca53c11d851bf09cac37a6ae95ebea5c0d37128707fb040797"),
+              ("oct31.zip", "F1_NR_2026-10-31", "2026-10-31",
+               "1947bc302ab59c355c8da53d078f384345e06f453fbf9a71df2b7c90a0d28ce1"),
+          ]
+          for archive, meeting, day, sha in sources:
+              report = replay_original_archive(
+                  root / archive, meeting_id=meeting,
+                  date_oslo=day, expected_pdf_sha256=sha,
+              )
+              rows = report["history_rows"]
+              assert report["source_bytes_sha256_verified"] is True
+              assert report["history_source_rows_indexed"] == len(rows)
+              assert report["history_source_rows_indexed"] > 0
+              assert report["gold_fields_per_row"] == len(HISTORY_GOLD_FIELDS) == 13
+              assert all(set(row["gold_field_candidates"]) == set(HISTORY_GOLD_FIELDS)
+                         for row in rows)
+              assert all(row["gold_field_candidates"]["gallop"]["value"] is None
+                         and row["gold_field_candidates"]["dq"]["value"] is None
+                         for row in rows)
+              assert report["data004e_holdout_390_accepted"] == 0
+              assert report["data004e_holdout_verified"] is False
+              assert report["production_parser_changed"] is False
+              assert report["production_parser_approved"] is False
+              assert report["pit_certified"] is False
+              assert report["bet_authorized"] is False
+              if meeting == "F2_NR_2026-10-27":
+                  assert report["pdf_race_sections"] == 7
+                  assert report["pdf_horse_headers"] == 69
+                  assert len(rows) >= 200
+              if meeting == "S3_NR_2026-10-23":
+                  ld = [row for row in rows if row["source"]["horse_name"] == "L D"]
+                  assert len(ld) == 5, len(ld)
+              summary = {k: v for k, v in report.items() if k != "history_rows"}
+              print("CDEV04_SOURCE_SHADOW", meeting, json.dumps(summary, sort_keys=True))
+          print("CDEV04_390_INDEPENDENT_GOLD_ACCEPTED=0 PRODUCTION_PARSER_CHANGED=false C6=BLOCKED")
+          PY
