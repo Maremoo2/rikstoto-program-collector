@@ -144,6 +144,45 @@ V4 Xpress 18.10.2026 Utvidet - rikstoto.no Side: 1 av 1
     assert [race["race"]["race_number"] for race in result["races"]] == [10, 1]
 
 
+# Source: actual Nov 1 Øvrevoll original PDF, page 2, archived in GitHub
+# Actions run 41280303682, artifact 13072403701. Only a short source heading
+# excerpt is transcribed; the archived PDF remains authoritative.
+def test_original_ovrevoll_prize_amount_is_not_race_81():
+    source_excerpt = """2
+TRIPPEL DUO VINNER PLASS
+2-ÅRSLØP
+1100m 1. 2-ÅRSLØP 81.900 kr 1100 dt Minnepremie og bilde til eier.
+For 2-årige hester som er godkjent i startboks. Vekt: 58 kg.
+Tillegg: 2 kg for hester som har seiret.START KL. 11:55
+1 KALIF MANZOR (GB), Lorenzo Putzulu 58 Ft 0 0
+2 CANDYCRUSH (SWE), Willa Synøve M. Schou 58 Ft 0 0
+Øvrevoll 01.11.2026 Utvidet - rikstoto.no Side: 2 av 9
+"""
+    result = parse_extended_pdf(
+        source_excerpt, meeting_id="OV_NR_2026-11-01", date="2026-11-01",
+        url="archive:41280303682", captured_at="2026-11-01T06:20:00+00:00")
+    assert result["qa"]["race_numbers"] == [2]
+    assert result["races"][0]["race"]["race_number_source"] == "pdf_heading_number"
+    assert result["races"][0]["race"]["scheduled_time_local"] == "11:55"
+    assert len(result["races"][0]["entrants"]) == 2
+    assert "RACE_NUMBER_ORDER_INFERRED" not in result["qa"]["warnings"]
+
+
+def test_price_like_race_heading_is_not_authoritative_even_below_30():
+    text = """2
+TRIPPEL DUO VINNER PLASS
+2-ÅRSLØP
+1100m 1. 2-ÅRSLØP 12.000 kr.START KL. 11:55
+1 FROST HORSE, Driver One
+Øvrevoll 01.11.2026 Utvidet - rikstoto.no Side: 2 av 9
+"""
+    result = parse_extended_pdf(text, meeting_id="OV_NR_2026-11-01",
+                                date="2026-11-01", url="original-layout-fixture",
+                                captured_at="2026-11-01T06:20:00+00:00")
+    assert result["qa"]["race_numbers"] == [2]
+    assert result["races"][0]["race"]["race_number_source"] == "pdf_heading_number"
+
+
 def test_unlabeled_race_keeps_inferred_provenance():
     unlabeled = SAMPLE.replace("1\nTRIPPEL", "TRIPPEL", 1)
     result = parsed(unlabeled)
