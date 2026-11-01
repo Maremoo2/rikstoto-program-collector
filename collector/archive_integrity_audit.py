@@ -103,6 +103,12 @@ def audit_archive_zip(archive: Path | str) -> dict:
                     report["errors"].append("MALFORMED_REQUEST_RECEIPT")
                     continue
                 status = entry.get("status")
+                if status == "SOURCE_ARCHIVE_COLLISION":
+                    # An earlier response was preserved but this attempt was
+                    # NOT archived. Other valid receipts in the same ZIP must
+                    # never turn a collision-affected day into raw-ready.
+                    report["errors"].append("ORIGINAL_SOURCE_PATH_COLLISION_OBSERVED")
+                    continue
                 if status not in ("PDF_OK", "JSON_OK"):
                     continue
                 # Exactly one successful immutable source receipt per archived
