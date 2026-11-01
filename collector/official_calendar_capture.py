@@ -9,7 +9,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import tempfile
 import urllib.error
 import urllib.request
 import urllib.robotparser
@@ -287,15 +289,19 @@ def attach_reviewed_calendar_claims(
     candidate["independent_race_denominator_verified"] = False
     encoded = (json.dumps(candidate, ensure_ascii=False, sort_keys=True,
                           indent=2) + "\n").encode("utf-8")
-    # Existing source reader checks claims against raw bytes before publication.
-    provisional = root / (output_path.name + ".pending")
-    try:
-        write_original_bytes_once(encoded, provisional, label="WRAPPER_JSON")
-        reviewed = read_official_bundle(provisional, day=day)
+    # A unique 0600 private temporary file lets the incumbent reader
+    # validate source excerpts BEFORE exclusive final publication. Never
+    # unlink a pre-existing path or a second reviewer's temp file.
+    with tempfile.NamedTemporaryFile(
+        mode="wb", dir=root, prefix=".official_review_",
+        suffix=".json", delete=True,
+    ) as provisional:
+        provisional.write(encoded)
+        provisional.flush()
+        os.fsync(provisional.fileno())
+        reviewed = read_official_bundle(Path(provisional.name), day=day)
         if reviewed["errors"] or reviewed["source_receipts_verified"] != 2:
             raise OfficialCaptureBlocked("REVIEWED_CANDIDATE_SOURCE_EXCERPT_INVALID")
-    finally:
-        provisional.unlink(missing_ok=True)
     write_original_bytes_once(encoded, output_path, label="WRAPPER_JSON")
     return {
         "bundle_path": str(output_path),
