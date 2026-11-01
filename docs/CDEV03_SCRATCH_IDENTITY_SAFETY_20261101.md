@@ -67,6 +67,30 @@ unverified races must have `scratched=null` and no confirmed scratches.
 The job prints real parsed/reconciled/blocked counts without substituting
 any retrospective source-time or complete-day denominator.
 
+## Real November 1 offline replay, full source byte validation
+
+Pinned original read-only workflow `41323136018` against immutable
+artifact `13072403701` reported:
+
+| Original-source cohort | Meetings | PDF races | Exact PDF/startlist race matches | PDF horse entries |
+|---|---:|---:|---:|---:|
+| All six observed physical venues | 6 | 56 | 54 | 605 |
+| Source-typed NO/SE *trotting* only (Momarken + Solvalla) | 2 | 21 | 21 | 238 |
+
+Original five other physical venues include gallop and foreign markets.
+The two blocked race identities were in the Milano `S3_NR_2026-11-01`
+source and contained placeholder labels like `HÄST 1`/`Häst 1`.
+There is **no independently attested real horse ID** for those rows,
+so they remain unverified. No horse names or scratch statuses were inferred.
+
+The `54/56` ratio is only a retrospective **observed source-consistency
+diagnostic**, not a C3 sample denominator or 98% acceptance measurement.
+Likewise, `21/21` on observed Norwegian and Swedish trot PDF sections
+does not establish complete physical day coverage, future as-of status,
+T-4 PIT, or any betting entitlement. The workflow now pins these exact
+original-archive counters to catch accidental regressions and reports
+them separately from C1/C3/C6 acceptance.
+
 ## Strict remaining acceptance gates
 
 - **C1:** independent physical racing calendar for NO/SE, 95% over
