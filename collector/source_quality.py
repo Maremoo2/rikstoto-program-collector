@@ -46,6 +46,8 @@ def summarize_source_quality(manifest: dict, races: list[dict]) -> dict:
         "physical_race_number_inferred": 0,
         "physical_race_number_unknown": 0,
         "physical_races_with_reconciled_meeting_snapshot": 0,
+        "physical_races_with_placeholder_identity": 0,
+        "physical_placeholder_horse_rows": 0,
         "physical_horse_rows": 0,
         "json_raw_receipts_verified": 0,
         "json_raw_receipts_legacy_unverifiable": 0,
@@ -88,11 +90,28 @@ def summarize_source_quality(manifest: dict, races: list[dict]) -> dict:
         elif num_source not in ("pdf_heading", "pdf_heading_number"):
             count["physical_race_number_unknown"] += 1
         audit = physical[mid].get("startlist_pdf_audit")
-        if (isinstance(audit, dict)
-                and audit.get("status") == "MATCHED_AS_OF_SNAPSHOT"):
-            count["physical_races_with_reconciled_meeting_snapshot"] += 1
+        if isinstance(audit, dict):
+            verified_numbers = audit.get("verified_race_numbers")
+            if isinstance(verified_numbers, list):
+                # New source reconciler emits exact verified race numbers;
+                # a partly unverified meeting must not hide its valid races.
+                if type(no) is int and no in verified_numbers:
+                    count["physical_races_with_reconciled_meeting_snapshot"] += 1
+            elif audit.get("status") == "MATCHED_AS_OF_SNAPSHOT":
+                # Legacy immutable archives lack the per-race detail.
+                count["physical_races_with_reconciled_meeting_snapshot"] += 1
 
     count["distinct_physical_race_keys"] = len(keys)
+    for meeting in physical.values():
+        audit = meeting.get("startlist_pdf_audit")
+        if not isinstance(audit, dict):
+            continue
+        rejected = audit.get("placeholder_race_numbers")
+        if isinstance(rejected, list):
+            count["physical_races_with_placeholder_identity"] += len(rejected)
+        rejected_horses = audit.get("placeholder_horses_unverified")
+        if type(rejected_horses) is int and rejected_horses >= 0:
+            count["physical_placeholder_horse_rows"] += rejected_horses
     requests = manifest.get("requests")
     for item in requests if isinstance(requests, list) else []:
         if not isinstance(item, dict):

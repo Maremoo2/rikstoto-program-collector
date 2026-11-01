@@ -1,5 +1,7 @@
 """Unit tests for exact PDF/startlist horse and scratch reconciliation."""
-from collector.startlist_audit import normalized_horse_name, reconcile_startlist
+from collector.startlist_audit import (
+    normalized_horse_name, reconcile_startlist, unresolved_placeholder_name,
+)
 
 
 def doc():
@@ -36,6 +38,50 @@ def test_exact_names_numbers_and_explicit_flags_verify_snapshot():
     assert race["qa"]["scratched_count"] == 1
     assert "SCRATCHES_UNVERIFIED" not in race["qa"]["warnings"]
     assert "SCRATCH_STATUS_MAY_CHANGE" in race["qa"]["warnings"]
+
+
+def test_matching_generic_horse_name_is_not_a_verified_identity():
+    race = doc()
+    race["entrants"][0]["name"] = "Häst 1"
+    api = starts()
+    api["result"]["6"][0]["horseName"] = "Häst 1"
+    audit = reconcile_startlist([race], api, captured_at="2026-11-01T06:20:00Z")
+    assert audit["status"] == "PARTIAL_OR_UNVERIFIED"
+    assert audit["race_numbers_match"] is True
+    assert audit["race_matches"] == audit["horses_verified"] == 0
+    assert audit["mismatches"][0] == {
+        "code": "UNRESOLVED_PLACEHOLDER_HORSE_IDENTITY",
+        "race": 6,
+        "placeholders": [{"number": 1, "pdf_name": "Häst 1",
+                          "startlist_name": "Häst 1"}],
+    }
+    assert race["qa"]["identity_verification"] == "UNVERIFIED_PLACEHOLDER_NAMES"
+    assert "PLACEHOLDER_HORSE_IDENTITY_REVIEW" in race["qa"]["warnings"]
+    assert all(x["scratch_state"] == "UNVERIFIED" for x in race["entrants"])
+
+
+def test_generic_identity_audit_counts_blocked_race_and_horses():
+    race = doc()
+    race["entrants"][0]["name"] = "Häst 1"
+    api = starts()
+    api["result"]["6"][0]["horseName"] = "Häst 1"
+    audit = reconcile_startlist([race], api)
+    assert audit["verified_race_numbers"] == []
+    assert audit["placeholder_race_numbers"] == [6]
+    assert audit["placeholder_horses_unverified"] == 1
+    assert audit["race_matches"] == audit["horses_verified"] == 0
+
+
+def test_generic_placeholder_in_one_source_also_blocks_without_inferred_name():
+    race = doc()
+    api = starts()
+    api["result"]["6"][1]["horseName"] = "Horse 2"
+    output = reconcile_startlist([race], api)
+    # Source disagreement alone blocks, never converts a generic value
+    # into a verified identity through a matching program number.
+    assert output["status"] == "PARTIAL_OR_UNVERIFIED"
+    assert output["race_matches"] == 0
+    assert race["entrants"][1]["scratch_state"] == "UNVERIFIED"
 
 
 def test_missing_boolean_never_proves_any_horse_active():
@@ -139,3 +185,14 @@ def test_repeated_same_physical_pdf_race_number_is_blocked_even_when_names_match
     }]
     assert all(h["scratch_state"] == "UNVERIFIED"
                for race in (a, b) for h in race["entrants"])
+
+
+def test_placeholder_grammar_is_narrow_and_normalized():
+    assert unresolved_placeholder_name("HÄST 1")
+    assert unresolved_placeholder_name("Häst 10")
+    assert unresolved_placeholder_name("Horse 30")
+    assert unresolved_placeholder_name("CAVALLO 4")
+    assert not unresolved_placeholder_name("Horse Power")
+    assert not unresolved_placeholder_name("Hästmann 1")
+    assert not unresolved_placeholder_name("Champion Horse 1")
+    assert not unresolved_placeholder_name("Häst 31")

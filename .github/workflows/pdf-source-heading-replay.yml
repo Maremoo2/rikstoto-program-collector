@@ -135,6 +135,7 @@ jobs:
           from pypdf import PdfReader
           from collector.pdf_program import parse_extended_pdf
           from collector.startlist_audit import reconcile_startlist
+          from collector.source_quality import summarize_source_quality
 
           with zipfile.ZipFile(Path(os.environ["RUNNER_TEMP"]) / "nov01-all.zip") as z:
               names = set(z.namelist())
@@ -159,6 +160,7 @@ jobs:
               race_keys = set()
               total_horses = 0
               matched_races = 0
+              all_parsed_races = []
               for meeting in physical:
                   mid = meeting["meeting_id"]
                   path_prefix = manifests[0].rsplit("/", 1)[0]
@@ -187,10 +189,31 @@ jobs:
                   audit = reconcile_startlist(
                       parsed["races"], starts["response"],
                       captured_at=starts["fetched_utc"])
-                  assert audit["status"] == "MATCHED_AS_OF_SNAPSHOT", (mid, audit)
-                  assert audit["race_matches"] == len(parsed["races"]), mid
-                  assert audit["horses_verified"] == sum(
-                      len(r["entrants"]) for r in parsed["races"]), mid
+                  meeting["startlist_pdf_audit"] = audit  # In-memory, original ZIP untouched
+                  all_parsed_races.extend(parsed["races"])
+                  if mid == "S3_NR_2026-11-01":
+                      # Milano's *original* races 7/8 have 18 placeholders
+                      # ("Häst 1" etc.) in BOTH PDF and public starts.
+                      # String equality is not horse identity corroboration.
+                      assert audit["status"] == "PARTIAL_OR_UNVERIFIED", (mid, audit)
+                      assert audit["race_matches"] == 6, audit
+                      assert audit["horses_verified"] == 56, audit
+                      placeholders = [
+                          m for m in audit["mismatches"] if isinstance(m, dict)
+                          and m.get("code") == "UNRESOLVED_PLACEHOLDER_HORSE_IDENTITY"
+                      ]
+                      assert [(m["race"], len(m["placeholders"]))
+                              for m in placeholders] == [(7, 8), (8, 10)], placeholders
+                      assert all(
+                          h["scratch_state"] == "UNVERIFIED"
+                          for doc in parsed["races"] if doc["race"]["race_number"] in (7, 8)
+                          for h in doc["entrants"]
+                      )
+                  else:
+                      assert audit["status"] == "MATCHED_AS_OF_SNAPSHOT", (mid, audit)
+                      assert audit["race_matches"] == len(parsed["races"]), mid
+                      assert audit["horses_verified"] == sum(
+                          len(r["entrants"]) for r in parsed["races"]), mid
                   for race in parsed["races"]:
                       key = (mid, race["race"]["race_number"])
                       assert key not in race_keys, key
@@ -199,8 +222,17 @@ jobs:
                   total_horses += audit["horses_verified"]
                   print("PHYSICAL_MEETING_SOURCE_RECONCILED", mid,
                         audit["race_matches"], audit["horses_verified"])
-              assert len(race_keys) == matched_races == 56
-              assert total_horses == 605, total_horses
+              assert len(race_keys) == 56  # 56 parsed physical race keys
+              assert matched_races == 54       # 2 Milano races remain unverified
+              assert total_horses == 587       # 18 unresolved names, not 605 real IDs
+              quality = summarize_source_quality(manifest, all_parsed_races)
+              assert quality["physical_race_candidate_rows"] == 56
+              assert quality["physical_horse_rows"] == 605
+              assert quality["physical_races_with_reconciled_meeting_snapshot"] == 54
+              assert quality["physical_races_with_placeholder_identity"] == 2
+              assert quality["physical_placeholder_horse_rows"] == 18
+              assert quality["pit_certified"] is False
+              assert quality["full_day_denominator_independently_verified"] is False
               # Full observed day sample != all races scheduled in the world
               # and no capture/fetch time proves original provider publication.
               assert manifest["completeness_verified"] is False
