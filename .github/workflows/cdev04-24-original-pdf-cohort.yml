@@ -123,8 +123,7 @@ jobs:
             --archive "12218163952=${RUNNER_TEMP}/original-12218163952.zip" \
             --archive "12219320854=${RUNNER_TEMP}/original-12219320854.zip" \
             --archive "12210589268=${RUNNER_TEMP}/original-12210589268.zip" \
-            --output "${RUNNER_TEMP}/cdev04-24-pdf-text-projection-report.json" \
-            --diagnostic-only
+            --output "${RUNNER_TEMP}/cdev04-24-pdf-text-projection-report.json"
           python - <<'PY'
           import json
           import os
@@ -149,8 +148,12 @@ jobs:
           print("CDEV04_ORIGINAL_24_PDF_TEXT_PROJECTION_DIAGNOSTIC", json.dumps(summary, sort_keys=True))
           assert report["source_only_original_pdf_corpus_verified"] is True
           assert len(report["program_diagnostics"]) == 24
-          assert (report["pdf_text_projection_verified"]
-                  + report["pdf_text_projection_blocked"]) == 24
+          assert report["status"] == "COMPLETE_ORIGINAL_PDF_TEXT_PROJECTION_SOURCE_ONLY"
+          assert report["pdf_text_projection_verified"] == 24
+          assert report["pdf_text_projection_blocked"] == 0
+          assert report["pdf_text_projection_missing"] == 0
+          assert report["errors"] == []
+          assert report["history_candidate_rows_from_reproduced_text"] > 0
           assert report["independent_pdf_page_visual_review"] is False
           assert report["data004e_390_gold_pairs_accepted"] == 0
           assert report["data004e_gold_verified"] is False
@@ -158,6 +161,5 @@ jobs:
           assert report["c6_t_minus_4_pit_certified"] is False
           assert report["bet_authorized"] is False
           assert report["hq_accepted"] is False
-          if report["status"] != "COMPLETE_ORIGINAL_PDF_TEXT_PROJECTION_SOURCE_ONLY":
-              print("CDEV04_PROJECTION_GATE=BLOCKED; this is a diagnostic audit, not parity approval")
+          print("CDEV04_SOURCE_TEXT_PARITY_GATE=PASS_SOURCE_ONLY; no history gold, PIT, BET or HQ authority")
           PY
