@@ -172,7 +172,7 @@ jobs:
                   assert hashlib.sha256(pdf).hexdigest() == pdf_receipts[pdf_path]
                   # Recreate the exact archived extraction from original PDF
                   # bytes, rather than trusting an arbitrary derived .txt file.
-                  extracted = "\\n\\n".join(
+                  extracted = "\n\n".join(
                       page.extract_text() or "" for page in PdfReader(io.BytesIO(pdf)).pages
                   )
                   archived_text = z.read(text_path).decode("utf-8")
