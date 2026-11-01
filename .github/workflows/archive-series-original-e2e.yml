@@ -20,16 +20,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Download immutable four-day original source captures
+      - name: Download all six original source captures (27 Oct through 1 Nov)
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           gh api "repos/${GH_REPO}/actions/artifacts/12726250010/zip" > "${RUNNER_TEMP}/oct27.zip"
+          gh api "repos/${GH_REPO}/actions/artifacts/12796602126/zip" > "${RUNNER_TEMP}/oct28.zip"
           gh api "repos/${GH_REPO}/actions/artifacts/12877782643/zip" > "${RUNNER_TEMP}/oct29.zip"
+          gh api "repos/${GH_REPO}/actions/artifacts/12959200430/zip" > "${RUNNER_TEMP}/oct30.zip"
           gh api "repos/${GH_REPO}/actions/artifacts/13032657626/zip" > "${RUNNER_TEMP}/oct31.zip"
           gh api "repos/${GH_REPO}/actions/artifacts/13072403701/zip" > "${RUNNER_TEMP}/nov01.zip"
-      - name: Prove missing source days and unchanged non-certification from originals
+      - name: Reconstruct all six captured days without inventing archive quality or PIT
         run: |
           python - <<'PY'
           import os
@@ -38,18 +40,24 @@ jobs:
 
           root = Path(os.environ["RUNNER_TEMP"])
           inputs = [root / n for n in
-                    ("oct27.zip", "oct29.zip", "oct31.zip", "nov01.zip")]
+                    ("oct27.zip", "oct28.zip", "oct29.zip",
+                     "oct30.zip", "oct31.zip", "nov01.zip")]
           r = audit_series(inputs, start_date="2026-10-27",
                            end_date="2026-11-01")
           print("ORIGINAL_SERIES_DIAGNOSTIC", r)
           assert r["status"] == "INSUFFICIENT_PREDECLARED_WINDOW"
           assert r["predeclared_days"] == 6
-          assert r["unique_source_days"] == 4
-          assert r["missing_source_days"] == ["2026-10-28", "2026-10-30"]
+          assert r["unique_source_days"] == 6
+          assert r["missing_source_days"] == []
           assert r["days_with_verified_successful_raw_receipts"] == 1
-          assert r["days_with_unverifiable_or_missing_receipts"] == 3
+          assert r["source_archives_supplied"] == 6
+          assert r["days_with_unverifiable_or_missing_receipts"] == 5
           assert r["by_day"]["2026-10-27"]["unrecoverable_legacy_json"] == 67
+          assert r["by_day"]["2026-10-28"]["original_pdf_verified"] == 6
+          assert r["by_day"]["2026-10-28"]["collector_status"] == "REVIEW_REQUIRED"
           assert r["by_day"]["2026-10-29"]["unrecoverable_legacy_json"] == 51
+          assert r["by_day"]["2026-10-30"]["original_pdf_verified"] == 8
+          assert r["by_day"]["2026-10-30"]["collector_status"] == "CAPTURED_UNVERIFIED"
           assert r["by_day"]["2026-10-31"]["unrecoverable_legacy_json"] == 80
           assert r["by_day"]["2026-11-01"]["original_json_verified"] == 73
           assert r["by_day"]["2026-11-01"]["original_pdf_verified"] == 7
