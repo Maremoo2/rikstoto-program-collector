@@ -25,7 +25,10 @@ from zoneinfo import ZoneInfo
 from .pipeline import DOMAIN, check_robots, source_allowed
 from .pdf_program import parse_extended_pdf
 from .calendar_audit import calendar_window, calendar_racedays, diagnose_calendar_response
-from .startlist_audit import reconcile_startlist, stage_unverified_positive_scratch_signals
+from .startlist_audit import (
+    SCRATCH_STATUS_CONTRACT, reconcile_startlist,
+    stage_unverified_positive_scratch_signals,
+)
 from .composite_audit import audit_composite_lineage
 from .homepage_schedule import homepage_racedays, schedule_comparison
 from .source_integrity import archive_json_bytes, write_original_bytes_once
@@ -303,6 +306,7 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
         "purpose": "public program and scratches morning snapshot",
         "discoveries": [], "meetings": [], "requests": logs, "warnings": warnings,
         "status": "REVIEW_REQUIRED", "completeness_verified": False,
+        "scratch_status_contract": SCRATCH_STATUS_CONTRACT,
         "calendar_source_diagnostic": {
             "status": "SOURCE_NOT_REQUESTED", "date_coverage_verified": False},
         "note": "A 07:00 snapshot is not a final scratch list or closing-odds snapshot.",
@@ -655,6 +659,7 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
             warnings.append("NO_SE_TROT_SOURCE_CLASSIFICATION_CONFLICT")
         dump(folder / "structured_program_day.json", {
             "date": day, "run_id": run, "source_type": "official_extended_pdf",
+            "scratch_status_contract": SCRATCH_STATUS_CONTRACT,
             "races": structured_races, "counts": {
                 "races": len(structured_races),
                 "horses": sum(len(doc["entrants"]) for doc in structured_races),
