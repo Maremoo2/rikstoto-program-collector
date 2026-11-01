@@ -23,7 +23,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install -r requirements-dev.txt
+      - run: python -m pip install -r requirements-dev.txt ruff==0.14.4
+      - name: Ruff on C-DEV-03 edited source and regression tests
+        run: ruff check collector/startlist_audit.py collector/pdf_program.py collector/daily.py tests/test_startlist_audit.py tests/test_pdf_program.py
       - name: Download immutable November 1 original PDF and JSON capture
         env:
           GH_TOKEN: ${{ github.token }}
