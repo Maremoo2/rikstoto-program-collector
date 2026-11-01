@@ -96,13 +96,41 @@ def audit_archive_zip(archive: Path | str) -> dict:
             # Even a source-declared flag is not independent full-day proof.
             report["completeness_verified"] = False
 
+            seen_successful_paths: set[str] = set()
+            seen_original_raw_paths: set[str] = set()
             for entry in requests:
                 if not isinstance(entry, dict):
                     report["errors"].append("MALFORMED_REQUEST_RECEIPT")
                     continue
                 status = entry.get("status")
+                if status == "SOURCE_ARCHIVE_COLLISION":
+                    # An earlier response was preserved but this attempt was
+                    # NOT archived. Other valid receipts in the same ZIP must
+                    # never turn a collision-affected day into raw-ready.
+                    report["errors"].append("ORIGINAL_SOURCE_PATH_COLLISION_OBSERVED")
+                    continue
                 if status not in ("PDF_OK", "JSON_OK"):
                     continue
+                # Exactly one successful immutable source receipt per archived
+                # filename. The former writer could overwrite a response at
+                # the same path, invalidating earlier receipts; identical
+                # duplicate hashes also overcount independent observations.
+                original_path = entry.get("path")
+                if not isinstance(original_path, str) or not original_path:
+                    report["errors"].append("MISSING_SOURCE_ARCHIVE_PATH")
+                    continue
+                if original_path in seen_successful_paths:
+                    report["errors"].append("DUPLICATE_SUCCESSFUL_SOURCE_PATH")
+                    continue
+                seen_successful_paths.add(original_path)
+                if status == "JSON_OK" and entry.get("raw_path"):
+                    raw_path = entry["raw_path"]
+                    if (not isinstance(raw_path, str)
+                            or raw_path in seen_original_raw_paths
+                            or raw_path in seen_successful_paths):
+                        report["errors"].append("REUSED_OR_INVALID_ORIGINAL_JSON_RAW_PATH")
+                        continue
+                    seen_original_raw_paths.add(raw_path)
                 recorded = entry.get("sha256")
                 if not isinstance(recorded, str) or not re.fullmatch(
                         r"[0-9a-f]{64}", recorded):

@@ -11,7 +11,8 @@ RUN = "20261031T061717822793Z"
 
 
 def _make(tmp_path, *, legacy=False, raw_tampered=False,
-          wrapper_tampered=False, release=False, extra=None):
+          wrapper_tampered=False, release=False, extra=None,
+          duplicate_success=None, reused_original_raw=False, collision=False):
     path = tmp_path / "daily.zip"
     root = f"{DAY}/{RUN}/" if release else f"output/daily/{DAY}/{RUN}/"
     def original_key(name):
@@ -34,6 +35,18 @@ def _make(tmp_path, *, legacy=False, raw_tampered=False,
             "wrapper_sha256": hashlib.sha256(wrapped).hexdigest(),
             "raw_readback_verified": True,
         })
+    if duplicate_success in {"JSON", "PDF"}:
+        receipts.append(dict(receipts[1 if duplicate_success == "JSON" else 0]))
+    if reused_original_raw:
+        receipts.append({
+            **receipts[1], "path": original_key("additional_wrapper.json"),
+        })
+    if collision:
+        receipts.append({
+            "status": "SOURCE_ARCHIVE_COLLISION",
+            "path": original_key("discovery_calendar.json"),
+            "source_type": "JSON",
+        })
     manifest = {
         "date_oslo": DAY, "run_id": RUN, "requests": receipts,
         "meetings": [{"meeting_id": "BJ_NR_2026-10-31",
@@ -50,6 +63,8 @@ def _make(tmp_path, *, legacy=False, raw_tampered=False,
         if not legacy:
             out.writestr(root + "discovery_calendar.raw.json",
                          b'TAMPER' if raw_tampered else raw)
+        if reused_original_raw:
+            out.writestr(root + "additional_wrapper.json", wrapped)
         if extra is not None:
             out.writestr(extra, b"extra")
     return path
@@ -111,3 +126,38 @@ def test_bad_archive_never_succeeds(tmp_path):
     result = audit_archive_zip(target)
     assert result["status"] == "BLOCKED"
     assert result["errors"] == ["ARCHIVE_UNREADABLE:BadZipFile"]
+
+
+
+def test_repeated_successful_original_pdf_path_is_not_two_distinct_sources(tmp_path):
+    result = audit_archive_zip(_make(tmp_path, duplicate_success="PDF"))
+    assert result["status"] == "BLOCKED"
+    assert "DUPLICATE_SUCCESSFUL_SOURCE_PATH" in result["errors"]
+    assert result["raw_provenance_complete"] is False
+
+
+def test_same_original_json_wrapper_path_cannot_attest_two_http_responses(tmp_path):
+    result = audit_archive_zip(_make(tmp_path, duplicate_success="JSON"))
+    assert result["status"] == "BLOCKED"
+    assert "DUPLICATE_SUCCESSFUL_SOURCE_PATH" in result["errors"]
+    assert result["json_raw_sha_verified"] == 1
+    assert result["raw_provenance_complete"] is False
+
+
+def test_one_raw_json_path_cannot_be_referenced_by_two_wrappers(tmp_path):
+    result = audit_archive_zip(_make(tmp_path, reused_original_raw=True))
+    assert result["status"] == "BLOCKED"
+    assert "REUSED_OR_INVALID_ORIGINAL_JSON_RAW_PATH" in result["errors"]
+    assert result["raw_provenance_complete"] is False
+
+
+
+def test_archived_failed_source_collision_blocks_raw_day_even_if_other_sources_good(tmp_path):
+    result = audit_archive_zip(_make(tmp_path, collision=True))
+    assert result["status"] == "BLOCKED"
+    assert result["json_raw_sha_verified"] == 1
+    assert result["pdf_raw_sha_verified"] == 1
+    assert "ORIGINAL_SOURCE_PATH_COLLISION_OBSERVED" in result["errors"]
+    assert result["raw_provenance_complete"] is False
+    assert result["pit_certified"] is False
+

@@ -28,7 +28,7 @@ from .calendar_audit import calendar_window, calendar_racedays, diagnose_calenda
 from .startlist_audit import reconcile_startlist
 from .composite_audit import audit_composite_lineage
 from .homepage_schedule import homepage_racedays, schedule_comparison
-from .source_integrity import archive_json_bytes
+from .source_integrity import archive_json_bytes, write_original_bytes_once
 from .source_quality import summarize_source_quality
 
 OSLO = ZoneInfo("Europe/Oslo")
@@ -163,7 +163,9 @@ async def request(ctx, robots, url, path: Path, log, *, binary=False):
         return None
     await asyncio.sleep(1.25)
     try:
-        reply = await ctx.request.get(url, timeout=24000, max_redirects=3)
+        # Never attribute a redirect's final body to the original official URL.
+        # 3xx is a failed source receipt until that new origin is separately verified.
+        reply = await ctx.request.get(url, timeout=24000, max_redirects=0)
         status = reply.status
         ct = reply.headers.get("content-type", "")
         if status != 200:
@@ -182,10 +184,13 @@ async def request(ctx, robots, url, path: Path, log, *, binary=False):
                 log.append({"url": url, "status": "NOT_PDF", "content_type": ct, "at_utc": utcnow()})
                 return None
             try:
-                path.parent.mkdir(parents=True, exist_ok=True)
-                path.write_bytes(raw)
-                if hashlib.sha256(path.read_bytes()).hexdigest() != hashlib.sha256(raw).hexdigest():
-                    raise OSError("PDF_RAW_READBACK_SHA_MISMATCH")
+                write_original_bytes_once(raw, path, label="PDF")
+            except FileExistsError as exc:
+                log.append({"url": url, "status": "SOURCE_ARCHIVE_COLLISION",
+                            "source_type": "PDF",
+                            "error": f"{type(exc).__name__}: {str(exc)[:200]}",
+                            "at_utc": utcnow()})
+                return None
             except OSError as exc:
                 log.append({"url": url, "status": "ARCHIVE_READBACK_FAILED",
                             "source_type": "PDF",
@@ -209,6 +214,12 @@ async def request(ctx, robots, url, path: Path, log, *, binary=False):
         except (ValueError, UnicodeError):
             log.append({"url": url, "status": "NOT_JSON", "content_type": ct,
                         "bytes": len(raw), "at_utc": observed_at})
+            return None
+        except FileExistsError as exc:
+            log.append({"url": url, "status": "SOURCE_ARCHIVE_COLLISION",
+                        "source_type": "JSON",
+                        "error": f"{type(exc).__name__}: {str(exc)[:200]}",
+                        "at_utc": observed_at})
             return None
         except (OSError, TypeError) as exc:
             log.append({"url": url, "status": "ARCHIVE_READBACK_FAILED",
