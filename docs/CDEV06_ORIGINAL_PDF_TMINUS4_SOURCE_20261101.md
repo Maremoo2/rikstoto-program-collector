@@ -62,6 +62,45 @@ any missing timestamps or T−4 observations. It prints aggregate source
 classification only; individual horse/history source rows are not
 exported to GitHub Actions logs.
 
+## Independently replayed original-source results, 1 November 2026
+
+On exact development HEAD `8a4e0404f24019fef8ffc4028fbfd1fb475696c5`:
+
+- Full Collector unit tests **606/606 PASS**
+  ([run 41338819521](https://github.com/Maremoo2/rikstoto-program-collector/actions/runs/41338819521)).
+- Ruff and **16 synthetic source-timing negative cases PASS**, plus
+  original SHA-locked November 1 ZIP replay
+  ([run 41338819554](https://github.com/Maremoo2/rikstoto-program-collector/actions/runs/41338819554)).
+- Original archived ZIP SHA-256
+  `ef500863ba372f81c19ab794a7ae5edb4d5b934069ffd0a37ef9f70e45f4f94e`.
+- Original manifest SHA-256
+  `9e3e5731e05b51b34593033d9a958faa5be10496f7423e32bc3a1ca788438751`.
+- **2/2 first-party typed physical NO/SE trotting meeting PDF receipts**
+  have their original SHA independently verified and PDF text reproduced.
+- **21/21 source-observed PDF race sections** had an explicit PDF race
+  number, parseable local race clock, and a PDF receipt observed
+  at least four minutes before that **unverified PDF-derived clock**.
+  There were 0 late-receipt observations and 0 unknown race clocks
+  in this *captured* sample.
+- One Xpress composite product was excluded.
+- The original first-party date API result remained
+  `EMPTY_RESULT_ARRAY`, so **C1's independent whole-day meeting
+  and race denominators are not established**.
+
+**This is NOT 21/21 PIT-qualified races.** In fact:
+`history_pdf_source_pit_eligible_races=0`,
+`c6_pit_certified=false`, `bet_authorized=false` and
+`hq_accepted=false`, as verified by the actual source replay.
+The 21 observations say only that an archived *morning* PDF
+receipt preceded its own printed race clock by at least four minutes.
+They neither prove what was published at T−4, nor actual start
+timestamps, later changes, market completeness, or independent
+coverage.
+
+The HQ exact-head review workflow remained
+`BLOCKED_HQ_REVIEW_CONFIGURATION_MISSING`
+([run 41338819534](https://github.com/Maremoo2/rikstoto-program-collector/actions/runs/41338819534)).
+
 ## Hard blocked gates
 
 - `source_first_publication_time_attested=false`
