@@ -56,6 +56,24 @@ def test_separate_physical_candidates_from_composite_and_pit():
     assert result["pit_certified"] is False
 
 
+def test_partial_meeting_reports_verified_races_not_binary_zero():
+    manifest = _manifest()
+    manifest["meetings"][0]["startlist_pdf_audit"] = {
+        "status": "PARTIAL_OR_UNVERIFIED",
+        "verified_race_numbers": [1],
+        "placeholder_race_numbers": [2],
+        "placeholder_horses_unverified": 3,
+    }
+    rows = [_race(number=1, horses=2), _race(number=2, horses=3)]
+    report = summarize_source_quality(manifest, rows)
+    assert report["physical_race_candidate_rows"] == 2
+    assert report["physical_horse_rows"] == 5
+    assert report["physical_races_with_reconciled_meeting_snapshot"] == 1
+    assert report["physical_races_with_placeholder_identity"] == 1
+    assert report["physical_placeholder_horse_rows"] == 3
+    assert report["pit_certified"] is False
+
+
 def test_json_raw_proof_counts_separate_pre_fix_and_corrupt_readback():
     r = summarize_source_quality(_manifest(), [])
     assert r["json_raw_receipts_verified"] == 1
