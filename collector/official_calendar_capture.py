@@ -15,14 +15,16 @@ import tempfile
 import urllib.error
 import urllib.request
 import urllib.robotparser
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Callable
 from urllib.parse import urlsplit, urlunsplit
 
 from .independent_day_window import (
     SCHEMA as BUNDLE_SCHEMA,
+)
+from .independent_day_window import (
     _trusted_official_url,
     read_official_bundle,
 )
@@ -137,6 +139,7 @@ def capture_official_calendar(
     sources: dict[str, str] | None = None,
     transport: Callable[..., HTTPSReply] | None = None,
     clock: Callable[[], datetime] | None = None,
+    allow_partial: bool = False,
 ) -> dict:
     """Fetch both original public sources and create exclusive source bundle.
 
@@ -163,6 +166,7 @@ def capture_official_calendar(
     receipts = []
     raw_source: dict[str, bytes] = {}
     robots_source: dict[str, bytes] = {}
+    blocked_sources: list[dict] = []
 
     # No incomplete positive bundle when either country source is blocked.
     for country in ("NO", "SE"):
@@ -170,14 +174,30 @@ def capture_official_calendar(
         robot_url = _robots_url(url)
         if url == robot_url:
             raise OfficialCaptureBlocked("ROBOTS_URL_EQUALS_CALENDAR")
-        robots_reply = fetch(robot_url, max_bytes=MAX_ROBOTS)
-        robot_bytes = _read_reply(
-            robots_reply, robot_url, maximum=MAX_ROBOTS, robots=True)
-        if not _robots_permits(robot_bytes, url):
-            raise OfficialCaptureBlocked("ROBOTS_NOT_PERMITTED:" + country)
-        page_reply = fetch(url, max_bytes=MAX_HTML)
-        body = _read_reply(
-            page_reply, url, maximum=MAX_HTML, robots=False)
+        robot_bytes = None
+        try:
+            robots_reply = fetch(robot_url, max_bytes=MAX_ROBOTS)
+            robot_bytes = _read_reply(
+                robots_reply, robot_url, maximum=MAX_ROBOTS, robots=True)
+            robots_source[country] = robot_bytes
+            if not _robots_permits(robot_bytes, url):
+                raise OfficialCaptureBlocked("ROBOTS_NOT_PERMITTED:" + country)
+            page_reply = fetch(url, max_bytes=MAX_HTML)
+            body = _read_reply(
+                page_reply, url, maximum=MAX_HTML, robots=False)
+        except OfficialCaptureBlocked as exc:
+            if not allow_partial:
+                raise
+            blocked_sources.append({
+                "country": country, "source_url": url,
+                "status": "BLOCKED", "reason": str(exc),
+                "observed_at_utc": _datetime_utc(now()),
+                "robots_url": robot_url, "robots_path": None,
+                "robots_sha256": (hashlib.sha256(robot_bytes).hexdigest()
+                                  if robot_bytes is not None else None),
+                "network_https_response_observed": real_transport and robot_bytes is not None,
+            })
+            continue
         observed = _datetime_utc(now())
         raw_source[country], robots_source[country] = body, robot_bytes
         receipts.append({
@@ -193,7 +213,7 @@ def capture_official_calendar(
             "network_https_response_observed": real_transport,
             "independent_transport_origin_attested": False,
         })
-    timestamp = now().astimezone(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+    timestamp = datetime.fromisoformat(_datetime_utc(now())).strftime("%Y%m%dT%H%M%S%fZ")
     identity = "official_" + day + "_" + timestamp
     for receipt in receipts:
         country = receipt["country"].lower()
@@ -207,15 +227,26 @@ def capture_official_calendar(
             label="OFFICIAL_CALENDAR_HTML")
         receipt["raw_path"], receipt["robots_path"] = source_name, robots_name
 
+    for blocked in blocked_sources:
+        country = blocked["country"]
+        if country in robots_source:
+            robots_name = identity + "." + country.lower() + ".robots.txt"
+            write_original_bytes_once(
+                robots_source[country], root / robots_name,
+                label="OFFICIAL_ROBOTS_TEXT")
+            blocked["robots_path"] = robots_name
+
     bundle = {
         "schema": BUNDLE_SCHEMA,
         "date_oslo": day,
         "sources": receipts,
         "capture_contract": SCHEMA,
-        "capture_status": "ORIGINAL_HTTPS_SOURCE_COPIES_REVIEW_REQUIRED",
+        "capture_status": ("BLOCKED_PARTIAL_OFFICIAL_SOURCE_CAPTURE" if blocked_sources
+                           else "ORIGINAL_HTTPS_SOURCE_COPIES_REVIEW_REQUIRED"),
+        "blocked_sources": blocked_sources,
         "capture_method": ("OS_HTTPS_GET_NO_REDIRECTS_ROBOTS_CHECK"
                            if real_transport else "INJECTED_OFFLINE_TRANSPORT_TEST"),
-        "captured_original_source_bodies": 2,
+        "captured_original_source_bodies": len(receipts),
         "original_bytes_sha256_readback_verified": True,
         "source_meeting_extract_reviewed": False,
         "independent_complete_day_denominator_verified": False,
@@ -230,7 +261,10 @@ def capture_official_calendar(
         (json.dumps(bundle, indent=2, sort_keys=True, ensure_ascii=False)
          + "\n").encode("utf-8"), target, label="WRAPPER_JSON")
     source_check = read_official_bundle(target, day=day)
-    if source_check["errors"]:
+    expected_errors = (["MISSING_NO_OR_SE_OFFICIAL_SOURCE_COPY"] if receipts else
+                       ["BUNDLE_SCHEMA_OR_DAY_MISMATCH"])
+    if (source_check["source_receipts_verified"] != len(receipts)
+            or source_check["errors"] != (expected_errors if blocked_sources else [])):
         raise OfficialCaptureBlocked(
             "CAPTURED_SOURCE_BUNDLE_READBACK_INVALID:" +
             ",".join(source_check["errors"]))
@@ -239,6 +273,7 @@ def capture_official_calendar(
         "source_sha256": {r["country"]: r["raw_sha256"] for r in receipts},
         "source_bytes": {r["country"]: r["raw_size"] for r in receipts},
         "status": bundle["capture_status"],
+        "blocked_sources": blocked_sources,
         "source_meetings_independently_verified": False,
         "independent_calendar_day_coverage_verified": False,
         "c6_pit_certified": False,
@@ -323,6 +358,8 @@ def main(argv: list[str] | None = None) -> int:
     cap.add_argument("--private-root", type=Path, required=True)
     cap.add_argument("--no-url", default=DEFAULT_OFFICIAL_URLS["NO"])
     cap.add_argument("--se-url", default=DEFAULT_OFFICIAL_URLS["SE"])
+    cap.add_argument("--allow-partial", action="store_true",
+                     help="Preserve permitted sources and explicit blockers; exit 2 if incomplete")
     annotate = sub.add_parser("annotate", help="Attach reviewed excerpts offline")
     annotate.add_argument("--bundle", type=Path, required=True)
     annotate.add_argument("--claims", type=Path, required=True)
@@ -332,7 +369,8 @@ def main(argv: list[str] | None = None) -> int:
         if args.action == "capture":
             result = capture_official_calendar(
                 day=args.day, private_root=args.private_root,
-                sources={"NO": args.no_url, "SE": args.se_url})
+                sources={"NO": args.no_url, "SE": args.se_url},
+                allow_partial=args.allow_partial)
         else:
             result = attach_reviewed_calendar_claims(
                 bundle_path=args.bundle,
@@ -342,7 +380,7 @@ def main(argv: list[str] | None = None) -> int:
     except (OfficialCaptureBlocked, ValueError, OSError) as exc:
         parser.error(type(exc).__name__ + ":" + str(exc)[:150])
     print(json.dumps(result, ensure_ascii=False, sort_keys=True))
-    return 0
+    return 2 if result.get("blocked_sources") else 0
 
 
 if __name__ == "__main__":
