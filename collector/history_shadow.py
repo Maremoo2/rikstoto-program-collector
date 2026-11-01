@@ -172,10 +172,22 @@ def replay_original_archive(
     archive_sha = hashlib.sha256(archive_path.read_bytes()).hexdigest()
     with zipfile.ZipFile(archive_path) as archive:
         paths = archive.namelist()
+        manifests = [name for name in paths if name.endswith("/manifest.json")]
+        if len(manifests) != 1:
+            raise ValueError("Missing or ambiguous source archive manifest")
+        manifest_path = manifests[0]
+        manifest = json.loads(archive.read(manifest_path))
+        prefix = manifest_path[:-len("manifest.json")]
+        if (not isinstance(manifest, dict)
+                or manifest.get("date_oslo") != date_oslo
+                or not isinstance(manifest.get("run_id"), str)
+                or not prefix.endswith("/" + date_oslo + "/" + manifest["run_id"] + "/")):
+            raise ValueError("Original archive manifest day/run mismatch")
+        expected_pdf_path = prefix + "meetings/" + meeting_id + "/full_program.pdf"
         pdf_paths = [name for name in paths
                      if name.endswith("/meetings/" + meeting_id + "/full_program.pdf")]
-        if len(pdf_paths) != 1:
-            raise ValueError("Missing or duplicate original physical PDF member")
+        if len(pdf_paths) != 1 or pdf_paths[0] != expected_pdf_path:
+            raise ValueError("Missing, duplicate or foreign-capture PDF member")
         pdf_path = pdf_paths[0]
         txt_path = pdf_path[:-4] + ".txt"
         if txt_path not in paths:
