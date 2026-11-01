@@ -50,7 +50,7 @@ def _source_index(*, pdf_sha=PDF_SHA, pages=1, included=True):
 
 def _archive(tmp_path, *, original=RAW_PDF, change_manifest=None,
              path=PDF_PATH, request_sha=PDF_SHA,
-             add_json_legacy=False, duplicate=False):
+             add_json_legacy=False, duplicate=False, meeting_type=False):
     root = tmp_path / "captured.zip"
     requests = [{
         "url": PDF_URL, "status": "PDF_OK", "path": path,
@@ -65,7 +65,8 @@ def _archive(tmp_path, *, original=RAW_PDF, change_manifest=None,
         })
     manifest = {
         "date_oslo": DAY, "run_id": RUN, "requests": requests,
-        "meetings": [{"meeting_id": MEETING, "is_multi_track_product": False}],
+        "meetings": [{"meeting_id": MEETING,
+                      "is_multi_track_product": meeting_type}],
         "counts": {},
     }
     if change_manifest:
@@ -100,6 +101,9 @@ def test_actual_pdf_byte_sha_page_and_collector_receipt_only(tmp_path):
     assert report["pdf_hashes_verified"] == 1
     assert report["pdf_page_counts_verified"] == 1
     assert report["pdf_request_receipts_correlated"] == 1
+    assert report["typed_physical_meeting_pdf_programs"] == 1
+    assert report["typed_composite_product_pdf_programs"] == 0
+    assert report["meeting_type_unverified_pdf_programs"] == 0
     assert report["archive_diagnostics"][0]["original_pdf_receipts_sha_verified_by_collector"] == 1
     assert report["data004e_holdout_gold_pairs_accepted"] == 0
     assert report["data004e_holdout_gold_pairs_total"] == 390
@@ -212,3 +216,21 @@ def test_no_gold_or_pit_even_with_matching_observation_timestamp(tmp_path):
     assert report["sample_rows_independently_gold_verified"] == 0
     assert report["c1_14day_coverage_eligible"] is False
     assert report["production_parser_changed"] is False
+
+
+def test_composite_type_cannot_be_inferred_from_meeting_id_prefix(tmp_path):
+    # OR looks like a physical meeting, but the original manifest alone
+    # is authoritative for source-declared composite/physical separation.
+    result = _audit(_source_index(), _archive(tmp_path, meeting_type=True))
+    assert result["status"] == "ORIGINAL_PDF_COHORT_SOURCE_ONLY_VERIFIED"
+    assert result["typed_composite_product_pdf_programs"] == 1
+    assert result["typed_physical_meeting_pdf_programs"] == 0
+    assert result["independent_complete_day_denominator_verified"] is False
+
+
+def test_untyped_meeting_is_not_silently_accepted_as_physical(tmp_path):
+    result = _audit(_source_index(), _archive(tmp_path, meeting_type=None))
+    assert result["pdf_hashes_verified"] == 1
+    assert result["meeting_type_unverified_pdf_programs"] == 1
+    assert result["typed_physical_meeting_pdf_programs"] == 0
+    assert result["c1_14day_coverage_eligible"] is False
