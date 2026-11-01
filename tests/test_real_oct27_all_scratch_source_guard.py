@@ -29,10 +29,10 @@ ORIGINAL = {
 def _pdf_sections():
     return [
         {
-            "race": {"race_number": race},
+            "race": {"race_number": race, "race_number_source": "pdf_heading"},
             "entrants": [
                 {"program_number": i, "name": name.upper(),
-                 "scratched": False, "scratch_state": "UNVERIFIED"}
+                 "scratched": None, "scratch_state": "UNVERIFIED"}
                 for i, name in enumerate(names, 1)
             ],
             "scratches": [],
