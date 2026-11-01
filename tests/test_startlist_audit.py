@@ -60,6 +60,18 @@ def test_matching_generic_horse_name_is_not_a_verified_identity():
     assert all(x["scratch_state"] == "UNVERIFIED" for x in race["entrants"])
 
 
+def test_generic_identity_audit_counts_blocked_race_and_horses():
+    race = doc()
+    race["entrants"][0]["name"] = "Häst 1"
+    api = starts()
+    api["result"]["6"][0]["horseName"] = "Häst 1"
+    audit = reconcile_startlist([race], api)
+    assert audit["verified_race_numbers"] == []
+    assert audit["placeholder_race_numbers"] == [6]
+    assert audit["placeholder_horses_unverified"] == 1
+    assert audit["race_matches"] == audit["horses_verified"] == 0
+
+
 def test_generic_placeholder_in_one_source_also_blocks_without_inferred_name():
     race = doc()
     api = starts()
