@@ -42,6 +42,9 @@ def reconcile_startlist(pdf_races: list[dict[str, Any]], source: Any,
         "status": "UNVERIFIED", "race_matches": 0, "horses_verified": 0,
         "confirmed_scratches": 0, "mismatches": [], "race_numbers_match": False,
         "snapshot_captured_utc": captured_at,
+        "verified_race_numbers": [],
+        "placeholder_race_numbers": [],
+        "placeholder_horses_unverified": 0,
     }
     if not isinstance(source, dict) or source.get("success") is not True:
         audit["mismatches"].append("STARTLIST_RESPONSE_INVALID")
@@ -131,6 +134,8 @@ def reconcile_startlist(pdf_races: list[dict[str, Any]], source: Any,
                 or unresolved_placeholder_name(api_horses[n]["horseName"]))
         ]
         if placeholders:
+            audit["placeholder_race_numbers"].append(race_no)
+            audit["placeholder_horses_unverified"] += len(placeholders)
             audit["mismatches"].append({
                 "code": "UNRESOLVED_PLACEHOLDER_HORSE_IDENTITY",
                 "race": race_no, "placeholders": placeholders,
@@ -202,6 +207,7 @@ def reconcile_startlist(pdf_races: list[dict[str, Any]], source: Any,
         if "SCRATCH_STATUS_MAY_CHANGE" not in qa["warnings"]:
             qa["warnings"].append("SCRATCH_STATUS_MAY_CHANGE")
         audit["race_matches"] += 1
+        audit["verified_race_numbers"].append(race_no)
         audit["horses_verified"] += len(doc["entrants"])
         audit["confirmed_scratches"] += len(scratches)
 
