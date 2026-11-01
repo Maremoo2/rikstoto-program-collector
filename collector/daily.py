@@ -30,6 +30,7 @@ from .composite_audit import audit_composite_lineage
 from .homepage_schedule import homepage_racedays, schedule_comparison
 from .source_integrity import archive_json_bytes, write_original_bytes_once
 from .source_quality import summarize_source_quality
+from .no_se_calendar import audit_no_se_trot_discovery, collection_order
 
 OSLO = ZoneInfo("Europe/Oslo")
 MEETING_ID = re.compile(r"\b[A-Z0-9]{1,14}_[A-Z]{2,4}_(20\d{2}-\d{2}-\d{2})\b", re.I)
@@ -403,7 +404,13 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
                     warnings.append("NO_MEETING_IDS_DISCOVERED_FROM_OFFICIAL_SOURCES")
                 if len(meeting_set) > max_meetings:
                     warnings.append(f"MEETING_LIMIT_EXCEEDED:{len(meeting_set)}>{max_meetings}")
-                for meeting in sorted(meeting_set)[:max_meetings]:
+                # Preserve the full candidate set. Under a meeting cap,
+                # source-typed NO/SE physical trotting runs before foreign
+                # meetings and composite products; excluded IDs remain visible.
+                queue = collection_order(day, manifest, meeting_set)
+                manifest["collection_order"] = queue
+                manifest["meeting_candidates_not_collected_due_limit"] = queue[max_meetings:]
+                for meeting in queue[:max_meetings]:
                     calendar_source = calendar_entries.get(meeting, {})
                     # SPA race array can contain only races offered for bet;
                     # do NOT compare its partial count to the full PDF.
@@ -654,6 +661,13 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
     finally:
         # Source-only blockers, never a complete-day or PIT certification.
         manifest["source_quality"] = summarize_source_quality(manifest, structured_races)
+        # Candidate-only NO/SE trot audit. C1 requires an INDEPENDENT full-day
+        # denominator and stays blocked even if all observed sources agree.
+        manifest["no_se_trot_discovery_audit"] = audit_no_se_trot_discovery(manifest)
+        if manifest["no_se_trot_discovery_audit"]["candidate_ids_not_collected"]:
+            warnings.append("NO_SE_TROT_SOURCE_CANDIDATES_NOT_COLLECTED")
+        if manifest["no_se_trot_discovery_audit"]["source_classification_conflicts"]:
+            warnings.append("NO_SE_TROT_SOURCE_CLASSIFICATION_CONFLICT")
         dump(folder / "structured_program_day.json", {
             "date": day, "run_id": run, "source_type": "official_extended_pdf",
             "races": structured_races, "counts": {
