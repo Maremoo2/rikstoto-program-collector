@@ -1,10 +1,13 @@
 """C1 original official HTTPS acquisition and reviewable day+2 bundle tests."""
 import hashlib
 import json
+import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+
+from collector.official_calendar_integration import compare_original_three_day_sources
 
 from collector.independent_day_window import (
     audit_official_day, audit_window, read_official_bundle,
@@ -284,3 +287,95 @@ def test_genuine_https_transport_requires_nonredirect_original_response(monkeypa
     reply = _get_https(DEFAULT_OFFICIAL_URLS["NO"], max_bytes=100)
     assert reply.body == DATA["NO"]
     assert reply.url == DEFAULT_OFFICIAL_URLS["NO"]
+
+
+
+def _original_collector_archive(tmp_path, *, wrong_date=False,
+                               tampered=False):
+    run = "20261101T061915114528Z"
+    root = f"output/daily/{DAY}/{run}/"
+    meeting = "MO_NR_" + DAY
+    raw_pdf = b"%PDF-1.4\nsynthetic source only\n"
+    data = _collector_manifest()
+    data.update({"run_id": run, "requests": [{
+        "url": "https://www.rikstoto.no/api/programdownload/ProgramPdf/Utvidet/" +
+        meeting, "status": "PDF_OK",
+        "path": root + f"meetings/{meeting}/full_program.pdf",
+        "sha256": hashlib.sha256(raw_pdf).hexdigest(),
+        "at_utc": "2026-11-01T06:19:15Z",
+    }], "counts": {}})
+    if wrong_date:
+        data["date_oslo"] = "2026-11-02"
+    path = tmp_path / "original-collector.zip"
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(root + "manifest.json", json.dumps(data))
+        archive.writestr(root + f"meetings/{meeting}/full_program.pdf",
+                         b"tamper" if tampered else raw_pdf)
+    return path
+
+
+def test_integrated_c1_original_zip_and_human_source_excerpts_no_false_accept(tmp_path):
+    root = tmp_path / "private"
+    root.mkdir(mode=0o700)
+    result = capture_official_calendar(
+        day=DAY, private_root=root, transport=_fake_transport()[0],
+        clock=lambda: NOW)
+    candidate = root / "reviewed.json"
+    attach_reviewed_calendar_claims(
+        bundle_path=Path(result["bundle_path"]), claims=_meeting_claims(),
+        output_path=candidate,
+    )
+    original = _original_collector_archive(tmp_path)
+    whole = compare_original_three_day_sources(
+        DAY, {DAY: original}, {DAY: candidate})
+    assert whole["status"] == "BLOCKED_INDEPENDENT_C1_DENOMINATOR"
+    assert whole["original_source_days_with_valid_receipts"] == 1
+    assert whole["official_source_days_with_two_hashed_copies"] == 1
+    day0 = whole["calendar_candidate_comparison"]["days"][0]
+    assert len(day0["matched_venue_candidates"]) == 2
+    assert day0["coverage_percentage"] is None
+    assert whole["source_evidence_by_day"][0]["original_archive_receipt_errors"] == []
+    assert whole["source_evidence_by_day"][1]["archive_input_supplied"] is False
+    assert whole["calendar_coverage_percentage"] is None
+    assert whole["c6_tminus4_pit_certified"] is False
+    assert whole["hq_accepted"] is False
+    assert whole["bet_authorized"] is False
+
+
+def test_original_pdf_tamper_blocks_c1_day_even_if_official_bundle_available(tmp_path):
+    root = tmp_path / "private"
+    root.mkdir(mode=0o700)
+    result = _capture(root)
+    out = compare_original_three_day_sources(
+        DAY, {DAY: _original_collector_archive(tmp_path, tampered=True)},
+        {DAY: Path(result["bundle_path"])})
+    assert out["original_source_days_with_valid_receipts"] == 0
+    assert "PDF_SOURCE_SHA_MISMATCH" in out[
+        "source_evidence_by_day"][0]["original_archive_receipt_errors"]
+    assert out["calendar_candidate_comparison"]["days"][0]["missing_collector_manifest"]
+    assert out["independent_race_denominator_verified"] is False
+
+
+def test_original_archive_calendar_day_disagreement_fails_closed(tmp_path):
+    result = compare_original_three_day_sources(
+        DAY, {DAY: _original_collector_archive(tmp_path, wrong_date=True)}, {})
+    assert result["original_source_days_with_valid_receipts"] == 0
+    assert "ORIGINAL_ARCHIVE_DAY_DISAGREES" in result[
+        "source_evidence_by_day"][0]["original_archive_receipt_errors"]
+    assert result["c1_14_day_coverage_eligible"] is False
+
+
+def test_out_of_window_original_inputs_never_silently_drop(tmp_path):
+    with pytest.raises(ValueError, match="outside requested"):
+        compare_original_three_day_sources(
+            DAY, {"2026-11-10": tmp_path / "archive.zip"}, {})
+
+
+def test_no_source_archive_and_no_bundle_is_explicit_blocked_not_no_races():
+    result = compare_original_three_day_sources(DAY, {}, {})
+    assert result["original_source_days_with_valid_receipts"] == 0
+    assert result["official_source_days_with_two_hashed_copies"] == 0
+    assert all(day["status"] == "BLOCKED_MISSING_EVIDENCE"
+               for day in result["calendar_candidate_comparison"]["days"])
+    assert result["calendar_coverage_percentage"] is None
+    assert result["independent_meeting_denominator_verified"] is False
