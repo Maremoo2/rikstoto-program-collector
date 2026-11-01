@@ -21,14 +21,20 @@ def _sha(payload: bytes) -> str:
 
 
 def _archive_name(name: str, names: set[str], prefix: str) -> str | None:
-    """Resolve only the two collector-owned documented ZIP layouts."""
+    """Resolve a receipt only inside the manifest's own day/run directory.
+
+    The capture ZIP may retain ``output/daily/`` while a private release ZIP
+    removes that prefix. Neither layout permits a receipt to borrow source
+    bytes from a different capture included in the same ZIP.
+    """
     if not isinstance(name, str) or not name:
         return None
-    if name in names:
-        return name
-    if name.startswith("output/daily/"):
-        candidate = name[len("output/daily/"):]
-        if candidate.startswith(prefix) and candidate in names:
+    logical = (name[len("output/daily/"):]
+               if name.startswith("output/daily/") else name)
+    if not logical.startswith(prefix) or len(logical) == len(prefix):
+        return None
+    for candidate in (name, logical, "output/daily/" + logical):
+        if candidate in names:
             return candidate
     return None
 
@@ -137,6 +143,27 @@ def audit_archive_zip(archive: Path | str) -> dict:
                     report["errors"].append("MISSING_OR_INVALID_SOURCE_SHA")
                     continue
                 if status == "PDF_OK":
+                    # SHA equality proves file bytes, not that the file was
+                    # fetched for the meeting named by this archived receipt.
+                    # The source URI and meeting directory must corroborate
+                    # the same physical race-day identity.
+                    source_url = entry.get("url")
+                    source_meeting = (
+                        re.fullmatch(
+                            r"https://www[.]rikstoto[.]no/api/programdownload/"
+                            r"ProgramPdf/Utvidet/([A-Z0-9_-]+)",
+                            source_url,
+                        )
+                        if isinstance(source_url, str) else None
+                    )
+                    archived_meeting = re.search(
+                        r"/meetings/([A-Z0-9_-]+)/full_program[.]pdf\Z",
+                        original_path,
+                    )
+                    if (source_meeting is None or archived_meeting is None
+                            or source_meeting.group(1) != archived_meeting.group(1)):
+                        report["errors"].append("PDF_SOURCE_MEETING_IDENTITY_MISMATCH")
+                        continue
                     resolved = _archive_name(entry.get("path"), file_names, prefix)
                     if not resolved:
                         report["errors"].append("PDF_ARCHIVE_PATH_MISSING")

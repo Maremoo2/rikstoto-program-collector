@@ -25,7 +25,8 @@ def _make(tmp_path, *, legacy=False, raw_tampered=False,
     pdf = b"%PDF-1.4\nsource-file"
     receipts = [
         {"status": "PDF_OK", "sha256": hashlib.sha256(pdf).hexdigest(),
-         "path": original_key("meetings/BJ/full_program.pdf")},
+         "path": original_key("meetings/BJ/full_program.pdf"),
+         "url": "https://www.rikstoto.no/api/programdownload/ProgramPdf/Utvidet/BJ"},
         {"status": "JSON_OK", "sha256": hashlib.sha256(raw).hexdigest(),
          "path": original_key("discovery_calendar.json")},
     ]
@@ -161,3 +162,118 @@ def test_archived_failed_source_collision_blocks_raw_day_even_if_other_sources_g
     assert result["raw_provenance_complete"] is False
     assert result["pit_certified"] is False
 
+
+
+def test_valid_sha_from_another_capture_cannot_attest_this_day(tmp_path):
+    """Foreign ZIP members must not satisfy a receipt in today's manifest."""
+    target = _make(tmp_path)
+    with zipfile.ZipFile(target) as original:
+        entries = {name: original.read(name) for name in original.namelist()}
+    manifest_name = next(name for name in entries if name.endswith("/manifest.json"))
+    manifest = json.loads(entries[manifest_name])
+    receipt = next(row for row in manifest["requests"]
+                   if row.get("status") == "PDF_OK")
+    own_path = receipt["path"]
+    foreign_path = own_path.replace(f"/{DAY}/{RUN}/", f"/2026-10-30/{RUN}/")
+    assert foreign_path != own_path
+    # The preserved PDF body still has the same valid SHA, but it lives
+    # under a different capture identity; no source has been forged.
+    entries[foreign_path] = entries.pop(own_path)
+    receipt["path"] = foreign_path
+    entries[manifest_name] = json.dumps(manifest).encode()
+    with zipfile.ZipFile(target, "w") as rewritten:
+        for name, body in entries.items():
+            rewritten.writestr(name, body)
+    result = audit_archive_zip(target)
+    assert result["status"] == "BLOCKED"
+    assert "PDF_ARCHIVE_PATH_MISSING" in result["errors"]
+    assert result["raw_provenance_complete"] is False
+    assert result["pit_certified"] is False
+
+
+def test_json_raw_cannot_be_borrowed_from_other_capture(tmp_path):
+    target = _make(tmp_path)
+    with zipfile.ZipFile(target) as original:
+        entries = {name: original.read(name) for name in original.namelist()}
+    manifest_name = next(name for name in entries if name.endswith("/manifest.json"))
+    manifest = json.loads(entries[manifest_name])
+    receipt = next(row for row in manifest["requests"]
+                   if row.get("status") == "JSON_OK")
+    own_path = receipt["raw_path"]
+    foreign_path = own_path.replace(f"/{DAY}/{RUN}/", f"/2026-10-30/{RUN}/")
+    entries[foreign_path] = entries.pop(own_path)
+    receipt["raw_path"] = foreign_path
+    entries[manifest_name] = json.dumps(manifest).encode()
+    with zipfile.ZipFile(target, "w") as rewritten:
+        for name, body in entries.items():
+            rewritten.writestr(name, body)
+    result = audit_archive_zip(target)
+    assert result["status"] == "BLOCKED"
+    assert "JSON_ORIGINAL_OR_WRAPPER_NOT_ARCHIVED" in result["errors"]
+    assert result["raw_provenance_complete"] is False
+
+
+def test_same_day_different_capture_cannot_attest_original_pdf(tmp_path):
+    """Same racing date is insufficient; run-id must also agree."""
+    target = _make(tmp_path)
+    with zipfile.ZipFile(target) as original:
+        entries = {name: original.read(name) for name in original.namelist()}
+    manifest_name = next(name for name in entries if name.endswith("/manifest.json"))
+    manifest = json.loads(entries[manifest_name])
+    receipt = next(r for r in manifest["requests"] if r["status"] == "PDF_OK")
+    own_path = receipt["path"]
+    foreign_path = own_path.replace(
+        f"/{DAY}/{RUN}/", f"/{DAY}/20261031T060000000000Z/"
+    )
+    assert foreign_path != own_path
+    entries[foreign_path] = entries.pop(own_path)
+    receipt["path"] = foreign_path
+    entries[manifest_name] = json.dumps(manifest).encode()
+    with zipfile.ZipFile(target, "w") as rewritten:
+        for name, body in entries.items():
+            rewritten.writestr(name, body)
+    report = audit_archive_zip(target)
+    assert report["status"] == "BLOCKED"
+    assert "PDF_ARCHIVE_PATH_MISSING" in report["errors"]
+    assert report["raw_provenance_complete"] is False
+
+
+def test_manifest_does_not_attest_foreign_capture_path(tmp_path):
+    target = _make(tmp_path)
+    with zipfile.ZipFile(target) as original:
+        entries = {name: original.read(name) for name in original.namelist()}
+    manifest_name = next(name for name in entries if name.endswith("/manifest.json"))
+    manifest = json.loads(entries[manifest_name])
+    manifest["run_id"] = "20261031T060000000000Z"
+    entries[manifest_name] = json.dumps(manifest).encode()
+    with zipfile.ZipFile(target, "w") as rewritten:
+        for name, body in entries.items():
+            rewritten.writestr(name, body)
+    result = audit_archive_zip(target)
+    assert result["status"] == "BLOCKED"
+    assert "MANIFEST_IDENTITY_MISMATCH" in result["errors"]
+    assert result["pit_certified"] is False
+
+
+def test_pdf_meeting_source_uri_must_match_archived_meeting(tmp_path):
+    """A byte-identical PDF from another meeting is not valid source proof."""
+    target = _make(tmp_path)
+    with zipfile.ZipFile(target) as original:
+        entries = {name: original.read(name) for name in original.namelist()}
+    manifest_name = next(name for name in entries if name.endswith("/manifest.json"))
+    manifest = json.loads(entries[manifest_name])
+    receipt = next(row for row in manifest["requests"]
+                   if row.get("status") == "PDF_OK")
+    own_path = receipt["path"]
+    wrong_meeting_path = own_path.replace("/meetings/BJ/", "/meetings/ST/")
+    entries[wrong_meeting_path] = entries.pop(own_path)
+    receipt["path"] = wrong_meeting_path
+    entries[manifest_name] = json.dumps(manifest).encode()
+    with zipfile.ZipFile(target, "w") as rewritten:
+        for name, body in entries.items():
+            rewritten.writestr(name, body)
+    report = audit_archive_zip(target)
+    assert report["status"] == "BLOCKED"
+    assert "PDF_SOURCE_MEETING_IDENTITY_MISMATCH" in report["errors"]
+    assert report["pdf_raw_sha_verified"] == 0
+    assert report["pit_certified"] is False

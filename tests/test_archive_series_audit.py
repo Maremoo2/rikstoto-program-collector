@@ -24,7 +24,8 @@ def _archive(tmp_path, day, *, legacy=False, tamper=False):
         {"status": "JSON_OK", "sha256": hashlib.sha256(raw).hexdigest(),
          "path": prefix + "calendar.json"},
         {"status": "PDF_OK", "sha256": hashlib.sha256(pdf).hexdigest(),
-         "path": prefix + "meetings/TEST/full_program.pdf"},
+         "path": prefix + "meetings/TEST/full_program.pdf",
+         "url": "https://www.rikstoto.no/api/programdownload/ProgramPdf/Utvidet/TEST"},
     ]
     if not legacy:
         requests[0].update({
