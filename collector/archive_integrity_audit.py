@@ -157,7 +157,7 @@ def audit_archive_zip(archive: Path | str) -> dict:
                         if isinstance(source_url, str) else None
                     )
                     archived_meeting = re.search(
-                        r"/meetings/([A-Z0-9_-]+)/full_program[.]pdf\\Z",
+                        r"/meetings/([A-Z0-9_-]+)/full_program[.]pdf\Z",
                         original_path,
                     )
                     if (source_meeting is None or archived_meeting is None
