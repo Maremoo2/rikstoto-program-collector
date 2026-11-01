@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - 'collector/official_calendar_capture.py'
+      - 'collector/official_calendar_integration.py'
       - 'collector/source_integrity.py'
       - 'tests/test_official_calendar_capture.py'
       - 'docs/CDEV_BUILD_INTEGRATE_C1_C6_20261101.md'
@@ -26,7 +27,7 @@ jobs:
         run: python -m pip install -r requirements-dev.txt ruff==0.14.4
       - name: Validate added source-acquisition and old C1 contracts
         run: |
-          ruff check collector/official_calendar_capture.py collector/source_integrity.py tests/test_official_calendar_capture.py
+          ruff check collector/official_calendar_capture.py collector/official_calendar_integration.py collector/source_integrity.py tests/test_official_calendar_capture.py
           python -m pytest -q tests/test_official_calendar_capture.py tests/test_independent_day_window.py tests/test_p0_source_integrity.py
       - name: Replay immutable Nov 1 Collector archive – no independent original official sources
         env:
