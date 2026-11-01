@@ -41,6 +41,8 @@ def _classify(day: str, manifest: dict) -> dict[str, Any]:
                 observed.update(k for k in item.get("meeting_ids", [])
                                 if isinstance(k, str))
     observed.update(k for source in source_maps.values() for k in source)
+    observed = {mid for mid in observed if isinstance(mid, str)
+                and DAY_KEY.fullmatch(mid) and mid.endswith("_" + day)}
     typed: dict[str, dict] = {}
     conflicts: set[str] = set()
     for source_name, source in source_maps.items():
@@ -133,6 +135,10 @@ def audit_no_se_trot_discovery(manifest: dict) -> dict[str, Any]:
     diagnostic = manifest.get("calendar_source_diagnostic")
     status = (diagnostic.get("status") if isinstance(diagnostic, dict)
               else "NOT_RECORDED")
+    missing_from_date = (
+        sorted(candidates - set(classes["sources"]["date_api"]))
+        if status == "TARGET_DAY_ENTRIES_PRESENT" else []
+    )
     # A date API whose results are empty/unknown MUST remain a coverage gap,
     # even if homepage and general racedays agree on all observed meetings.
     blockers = []
@@ -140,6 +146,8 @@ def audit_no_se_trot_discovery(manifest: dict) -> dict[str, Any]:
         blockers.append("DATE_API_NOT_VERIFIED:" + str(status))
     if missing:
         blockers.append("SOURCE_CANDIDATES_NOT_CAPTURED")
+    if missing_from_date:
+        blockers.append("SOURCE_CANDIDATES_ABSENT_FROM_DATE_API")
     if not_auto:
         blockers.append("CANDIDATES_NOT_AUTOMATICALLY_DISCOVERED")
     if classes["conflicts"]:
@@ -157,7 +165,7 @@ def audit_no_se_trot_discovery(manifest: dict) -> dict[str, Any]:
         "scope": "OBSERVED_FIRST_PARTY_NO_SE_TROT_PHYSICAL_CANDIDATES",
         "status": ("REVIEW_REQUIRED" if blockers
                    else "OBSERVED_CANDIDATES_RECONCILED_UNVERIFIED_DAY"),
-        "country_sport_source_attested_only": True,
+        "country_sport_from_typed_source_fields_only": True,
         "independent_whole_day_denominator_verified": False,
         "c1_coverage_eligible": False,
         "pit_certified": False, "bet_authorized": False,
@@ -168,6 +176,7 @@ def audit_no_se_trot_discovery(manifest: dict) -> dict[str, Any]:
         "no_se_trot_captured_count": len(captured),
         "no_se_trot_observed_pdf_race_count": candidate_races,
         "candidate_ids_not_collected": sorted(missing),
+        "candidate_ids_absent_from_date_api": missing_from_date,
         "candidate_ids_not_auto_discovered": sorted(not_auto),
         "candidate_ids_manual_seeded": sorted(candidates & manual),
         "candidate_ids_pdf_missing": pdf_missing,
