@@ -12,7 +12,7 @@ RUN = "20261031T061717822793Z"
 
 def _make(tmp_path, *, legacy=False, raw_tampered=False,
           wrapper_tampered=False, release=False, extra=None,
-          duplicate_success=None, reused_original_raw=False):
+          duplicate_success=None, reused_original_raw=False, collision=False):
     path = tmp_path / "daily.zip"
     root = f"{DAY}/{RUN}/" if release else f"output/daily/{DAY}/{RUN}/"
     def original_key(name):
@@ -40,6 +40,12 @@ def _make(tmp_path, *, legacy=False, raw_tampered=False,
     if reused_original_raw:
         receipts.append({
             **receipts[1], "path": original_key("additional_wrapper.json"),
+        })
+    if collision:
+        receipts.append({
+            "status": "SOURCE_ARCHIVE_COLLISION",
+            "path": original_key("discovery_calendar.json"),
+            "source_type": "JSON",
         })
     manifest = {
         "date_oslo": DAY, "run_id": RUN, "requests": receipts,
@@ -143,4 +149,15 @@ def test_one_raw_json_path_cannot_be_referenced_by_two_wrappers(tmp_path):
     assert result["status"] == "BLOCKED"
     assert "REUSED_OR_INVALID_ORIGINAL_JSON_RAW_PATH" in result["errors"]
     assert result["raw_provenance_complete"] is False
+
+
+
+def test_archived_failed_source_collision_blocks_raw_day_even_if_other_sources_good(tmp_path):
+    result = audit_archive_zip(_make(tmp_path, collision=True))
+    assert result["status"] == "BLOCKED"
+    assert result["json_raw_sha_verified"] == 1
+    assert result["pdf_raw_sha_verified"] == 1
+    assert "ORIGINAL_SOURCE_PATH_COLLISION_OBSERVED" in result["errors"]
+    assert result["raw_provenance_complete"] is False
+    assert result["pit_certified"] is False
 
