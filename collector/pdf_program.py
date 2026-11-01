@@ -112,7 +112,7 @@ def parse_extended_pdf(text: str, *, meeting_id: str, date: str,
                                "odds_display": None, "prize_display": None,
                                "top_three": None, "raw_text": line, "comment": None})
             entrants.append({"program_number": number, "number_source": "official_pdf",
-                             "name": name, "driver": driver, "scratched": False,
+                             "name": name, "driver": driver, "scratched": None,
                              "scratch_state": "UNVERIFIED", "past_starts": starts,
                              "year_stats": {}, "total_stats": None,
                              "identity_text": next((x for x in block if "-års" in x), None),

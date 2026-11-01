@@ -17,15 +17,18 @@ import io
 import json
 import re
 import sys
-from datetime import date as Date, datetime, timedelta, timezone
+from datetime import date as Date, datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
-from .pipeline import DOMAIN, USER_AGENT, check_robots, source_allowed
+from .pipeline import DOMAIN, check_robots, source_allowed
 from .pdf_program import parse_extended_pdf
 from .calendar_audit import calendar_window, calendar_racedays, diagnose_calendar_response
-from .startlist_audit import reconcile_startlist
+from .startlist_audit import (
+    SCRATCH_STATUS_CONTRACT, reconcile_startlist,
+    stage_unverified_positive_scratch_signals,
+)
 from .composite_audit import audit_composite_lineage
 from .homepage_schedule import homepage_racedays, schedule_comparison
 from .source_integrity import archive_json_bytes, write_original_bytes_once
@@ -303,6 +306,7 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
         "purpose": "public program and scratches morning snapshot",
         "discoveries": [], "meetings": [], "requests": logs, "warnings": warnings,
         "status": "REVIEW_REQUIRED", "completeness_verified": False,
+        "scratch_status_contract": SCRATCH_STATUS_CONTRACT,
         "calendar_source_diagnostic": {
             "status": "SOURCE_NOT_REQUESTED", "date_coverage_verified": False},
         "note": "A 07:00 snapshot is not a final scratch list or closing-odds snapshot.",
@@ -480,31 +484,16 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
                                 warnings.append(f"CALENDAR_PDF_RACE_MISMATCH:{meeting}")
                             if not record["race_numbers"]:
                                 warnings.append(f"RACE_COUNT_UNVERIFIED_AGAINST_STARTLIST:{meeting}")
-                            # Preserve explicit positive scratch events and avoid
-                            # incorrectly declaring everyone else 'not scratched'.
+                            # Keep all positive-only source flags as
+                            # UNVERIFIED candidates. Do not mark an entrant
+                            # scratched by number OR name before the *entire*
+                            # PDF/official-startlist identity and field check.
+                            # A failed reconciliation must leave every horse
+                            # state UNKNOWN rather than claiming a confirmed
+                            # scratch based on a single uncorroborated flag.
                             scratch_events = scratch["positive_scratches"] if starts is not None else []
                             for doc in parsed_program["races"]:
-                                assigned = []
-                                for event in scratch_events:
-                                    if str(event.get("race_number")) != str(doc["race"]["race_number"]):
-                                        continue
-                                    for horse in doc["entrants"]:
-                                        if ((event.get("horse_number") is not None and
-                                             str(horse["program_number"]) == str(event["horse_number"]))
-                                                or (event.get("horse_name") and
-                                                    horse["name"].casefold() == str(event["horse_name"]).casefold())):
-                                            horse["scratched"] = True
-                                            horse["scratch_state"] = "SCRATCHED_CONFIRMED_BY_STARTLIST"
-                                            assigned.append({"horse_number": horse["program_number"],
-                                                             "horse_name": horse["name"],
-                                                             "race_number": doc["race"]["race_number"]})
-                                            break
-                                doc["scratches"] = assigned
-                                doc["qa"]["scratched_count"] = len(assigned) if assigned else None
-                                # Never infer all other runners are active from
-                                # a positive-only scratch-status extraction.
-                                doc["qa"]["active_count"] = None
-                                doc["qa"]["scratch_verification"] = "positive_only"
+                                stage_unverified_positive_scratch_signals(doc, scratch_events)
                             # A verified starts response explicitly carries isScratched
                             # as a BOOLEAN for every horse. Cross-check exact PDF
                             # race/start numbers AND names before marking any horse
@@ -670,6 +659,7 @@ async def archive_day(day, out, *, max_meetings=18, max_races=18, seed_meetings=
             warnings.append("NO_SE_TROT_SOURCE_CLASSIFICATION_CONFLICT")
         dump(folder / "structured_program_day.json", {
             "date": day, "run_id": run, "source_type": "official_extended_pdf",
+            "scratch_status_contract": SCRATCH_STATUS_CONTRACT,
             "races": structured_races, "counts": {
                 "races": len(structured_races),
                 "horses": sum(len(doc["entrants"]) for doc in structured_races),

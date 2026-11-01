@@ -12,6 +12,9 @@ import unicodedata
 from typing import Any
 
 
+SCRATCH_STATUS_CONTRACT = "COLLECTOR_SCRATCH_AS_OF_V2"
+
+
 def normalized_horse_name(value: str) -> str:
     """Identity check independent of case and accents, not of spelling."""
     ascii_name = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode()
@@ -29,6 +32,47 @@ def unresolved_placeholder_name(value: str) -> bool:
         r"(?:hast|horse|cavallo|cheval)(?:[1-9]|[12]\d|30)",
         normalized_horse_name(value),
     ))
+
+
+def stage_unverified_positive_scratch_signals(
+    doc: dict[str, Any], events: list[dict[str, Any]],
+) -> None:
+    """Keep preliminary public flag observations separate from verified states.
+
+    Positive-only events cannot establish a horse identity, field
+    completeness, or even the identity of a scratched horse if the API
+    conflicts with the PDF. Only reconcile_startlist can authorize a
+    per-horse ACTIVE/SCRATCHED_AS_OF_SNAPSHOT state.
+    """
+    race = doc["race"]["race_number"]
+    candidates = [
+        {"race_number": event.get("race_number"),
+         "horse_number": event.get("horse_number"),
+         "horse_name": event.get("horse_name"),
+         "source_path": event.get("source_path"),
+         "evidence": event.get("evidence"),
+         "verification": "UNVERIFIED_POSITIVE_SIGNAL"}
+        for event in events
+        if isinstance(event, dict) and type(event.get("race_number")) is int
+        and event["race_number"] == race
+    ]
+    doc["scratch_signal_candidates"] = candidates
+    doc["scratches"] = []
+    for horse in doc["entrants"]:
+        horse["scratched"] = None
+        horse["scratch_state"] = "UNVERIFIED"
+        horse.pop("scratch_source", None)
+        horse.pop("scratch_captured_utc", None)
+    qa = doc["qa"]
+    qa["scratch_status_contract"] = SCRATCH_STATUS_CONTRACT
+    qa["active_count"] = None
+    qa["scratched_count"] = None
+    qa["scratches_complete_as_of_snapshot"] = False
+    qa["scratch_verification"] = (
+        "UNVERIFIED_POSITIVE_ONLY" if candidates else "UNVERIFIED_NO_POSITIVE_SIGNAL"
+    )
+    if "SCRATCHES_UNVERIFIED" not in qa.setdefault("warnings", []):
+        qa["warnings"].append("SCRATCHES_UNVERIFIED")
 
 
 def reconcile_startlist(pdf_races: list[dict[str, Any]], source: Any,
@@ -54,9 +98,22 @@ def reconcile_startlist(pdf_races: list[dict[str, Any]], source: Any,
         audit["mismatches"].append("STARTLIST_RESULT_UNRECOGNIZED")
         return audit
 
-    known_races = {int(k) for k, value in result.items()
-                   if isinstance(k, str) and k.isdigit()
-                   and 1 <= int(k) <= 30 and isinstance(value, list)}
+    # A malformed *additional* API race must not vanish from the
+    # denominator and leave a seemingly complete PDF/startlist match.
+    # Only canonical physical race-number keys with list values qualify.
+    unrecognized = sorted(
+        str(key) for key, value in result.items()
+        if not (isinstance(key, str) and key.isascii() and key.isdecimal()
+                and key == str(int(key)) and 1 <= int(key) <= 30
+                and isinstance(value, list))
+    )
+    if unrecognized:
+        audit["mismatches"].append({
+            "code": "UNRECOGNIZED_STARTLIST_RACE_KEYS",
+            "keys": unrecognized,
+        })
+        return audit
+    known_races = {int(key) for key in result}
     pdf_race_numbers = {d["race"]["race_number"] for d in pdf_races}
     if len(pdf_race_numbers) != len(pdf_races):
         audit["mismatches"].append({
@@ -73,11 +130,16 @@ def reconcile_startlist(pdf_races: list[dict[str, Any]], source: Any,
         })
     for doc in pdf_races:
         race_no = doc["race"]["race_number"]
-        # A race number invented from PDF section order is not an original
-        # physical-race identity, even if it coincidentally matches the API.
-        if doc["race"].get("race_number_source") == "pdf_order_inferred":
+        # A race number must be explicitly printed in the official PDF.
+        # Missing/unrecognized provenance is just as unsafe as an ordinal
+        # inferred from programme section order.
+        number_provenance = doc["race"].get("race_number_source")
+        if number_provenance not in ("pdf_heading", "pdf_heading_number"):
             audit["mismatches"].append({
-                "code": "PDF_PHYSICAL_RACE_NUMBER_INFERRED", "race": race_no})
+                "code": ("PDF_PHYSICAL_RACE_NUMBER_INFERRED"
+                         if number_provenance == "pdf_order_inferred"
+                         else "PDF_PHYSICAL_RACE_NUMBER_SOURCE_UNVERIFIED"),
+                "race": race_no})
             continue
         rows = result.get(str(race_no))
         if not isinstance(rows, list):
@@ -93,7 +155,19 @@ def reconcile_startlist(pdf_races: list[dict[str, Any]], source: Any,
                 malformed = True
                 break
             number = item["startNumber"]
-            if number in api_horses or not isinstance(item.get("horseName"), str) or type(item.get("isScratched")) is not bool:
+            # Rows declaring an internal raceNumber must agree with the
+            # enclosing physical race key; a matching runner number alone
+            # must never override a contradictory race identity.
+            declared_race = item.get("raceNumber")
+            if declared_race is not None and (
+                type(declared_race) is not int or declared_race != race_no
+            ):
+                malformed = True
+                break
+            if (not 1 <= number <= 99 or number in api_horses
+                    or not isinstance(item.get("horseName"), str)
+                    or not normalized_horse_name(item["horseName"])
+                    or type(item.get("isScratched")) is not bool):
                 malformed = True
                 break
             api_horses[number] = item
@@ -120,6 +194,24 @@ def reconcile_startlist(pdf_races: list[dict[str, Any]], source: Any,
                                             if normalized_horse_name(pdf_horses[n]["name"]) !=
                                                normalized_horse_name(api_horses[n]["horseName"])
                                         ]})
+            continue
+
+        # Number/name agreement is insufficient when a race contains
+        # two identically normalized names. A race cannot assign physical
+        # horse identity uniquely in that case without an original horse ID.
+        pdf_names = [normalized_horse_name(pdf_horses[n]["name"])
+                     for n in sorted(pdf_horses)]
+        api_names = [normalized_horse_name(api_horses[n]["horseName"])
+                     for n in sorted(api_horses)]
+        duplicates = sorted({name for name in pdf_names + api_names
+                             if name and (pdf_names.count(name) > 1
+                                          or api_names.count(name) > 1)})
+        if duplicates:
+            audit["mismatches"].append({
+                "code": "AMBIGUOUS_DUPLICATE_HORSE_IDENTITY",
+                "race": race_no, "normalized_names": duplicates,
+            })
+            doc["qa"]["identity_verification"] = "UNVERIFIED_DUPLICATE_HORSE_NAMES"
             continue
 
         # Two source files can agree on a *generic placeholder* rather than

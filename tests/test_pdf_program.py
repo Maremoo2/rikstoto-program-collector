@@ -301,3 +301,14 @@ Bjerke/Axevalla 27.10.2026 Utvidet - rikstoto.no Side: 1 av 9
     assert [d["race"]["race_number"] for d in result["races"]] == [5, 7]
     assert all(d["race"]["race_number_source"] == "pdf_heading" for d in result["races"])
     assert "RACE_NUMBER_ORDER_INFERRED" not in result["qa"]["warnings"]
+
+
+def test_original_pdf_alone_never_declares_horse_active_or_scratched():
+    parsed_doc = parsed()
+    assert parsed_doc["qa"]["horses"] == 3
+    for race in parsed_doc["races"]:
+        for horse in race["entrants"]:
+            assert horse["scratched"] is None
+            assert horse["scratch_state"] == "UNVERIFIED"
+        assert race["qa"]["active_count"] is None
+        assert race["qa"]["scratched_count"] is None
