@@ -1,8 +1,6 @@
 """C-DEV-04 strict shadow-only source history diagnostics, no 390-cell gold."""
 import hashlib
-import json
 import zipfile
-from pathlib import Path
 
 import pytest
 
