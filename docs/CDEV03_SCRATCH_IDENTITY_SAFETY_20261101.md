@@ -49,6 +49,24 @@ are rewritten.
 5. Existing all-runners-scratched, inferred physical race number,
    duplicate PDF race and placeholder-name quarantine stays intact.
 
+## Consumer contract / compatibility
+
+New output explicitly carries
+`scratch_status_contract="COLLECTOR_SCRATCH_AS_OF_V2"` in the
+daily manifest and `structured_program_day.json`, with the same
+contract string in each staged race's `qa`.
+
+**Migration required for consumers that previously assumed boolean
+`horse.scratched`:** this field is now tri-state. `null` is
+**UNKNOWN**, never proof of active or scratched. Only a boolean paired
+with `ACTIVE_AS_OF_SNAPSHOT` or `SCRATCHED_AS_OF_SNAPSHOT` after
+full-field reconciliation is a source-verifiable *as-of* status.
+`scratch_signal_candidates` must never be treated as authoritative.
+Legacy archive records have the old semantics and are not rewritten.
+This patch intentionally does **not** modify the Betting consumer;
+compatibility must be independently reviewed before enabling that
+consumer for new source snapshots.
+
 ## Original capture evidence
 
 Original GitHub Actions artifact **13072403701** on 2026-11-01 has
