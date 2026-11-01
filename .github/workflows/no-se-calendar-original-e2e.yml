@@ -1,0 +1,78 @@
+name: NO-SE physical trot calendar original archive replay (read only)
+
+on:
+  pull_request:
+    paths:
+      - 'collector/no_se_calendar.py'
+      - 'collector/daily.py'
+      - 'tests/test_no_se_calendar.py'
+      - '.github/workflows/no-se-calendar-original-e2e.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  original-calendar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download six immutable original morning capture artifacts
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/${GH_REPO}/actions/artifacts/12726250010/zip" > "${RUNNER_TEMP}/2026-10-27.zip"
+          gh api "repos/${GH_REPO}/actions/artifacts/12796602126/zip" > "${RUNNER_TEMP}/2026-10-28.zip"
+          gh api "repos/${GH_REPO}/actions/artifacts/12877782643/zip" > "${RUNNER_TEMP}/2026-10-29.zip"
+          gh api "repos/${GH_REPO}/actions/artifacts/12959200430/zip" > "${RUNNER_TEMP}/2026-10-30.zip"
+          gh api "repos/${GH_REPO}/actions/artifacts/13032657626/zip" > "${RUNNER_TEMP}/2026-10-31.zip"
+          gh api "repos/${GH_REPO}/actions/artifacts/13072403701/zip" > "${RUNNER_TEMP}/2026-11-01.zip"
+      - name: Verify original manifest SHA and reclassify only source-typed NO-SE trot
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import zipfile
+          from pathlib import Path
+          from collector.no_se_calendar import audit_no_se_trot_discovery
+
+          # Each expected count is an OBSERVED candidate count, not
+          # independent all-races/day coverage or a prospective PIT audit.
+          expected = {
+              "2026-10-27": ("afc398eae7bc0b7cb73845432449c0f86f337d3449347e074dcb0cf86b3f355c", 3, 28),
+              "2026-10-28": ("6283f7695f9fba5aa5609f882bfedda02b0a4b2f046962c72c5b26a480d25543", 2, 19),
+              "2026-10-29": ("0936848546deada25938d8f6e61c4cfe9c41d726137ec2a71863c5022cb76267", 3, 26),
+              "2026-10-30": ("49e465224528392b53889f5ce5c17e5f540675a12d96c756ef4f1ca5cf2b745a", 3, 26),
+              "2026-10-31": ("17932ad46ef9d96977ff251a144dec097f8b83051f3670005e730f53be1629b2", 2, 22),
+              "2026-11-01": ("9e3e5731e05b51b34593033d9a958faa5be10496f7423e32bc3a1ca788438751", 2, 21),
+          }
+          for day, (manifest_sha, expected_meetings, expected_races) in expected.items():
+              path = Path(os.environ["RUNNER_TEMP"]) / (day + ".zip")
+              with zipfile.ZipFile(path) as archive:
+                  manifest_paths = [n for n in archive.namelist()
+                                    if n.endswith("/manifest.json")]
+                  assert len(manifest_paths) == 1, (day, manifest_paths)
+                  body = archive.read(manifest_paths[0])
+                  assert hashlib.sha256(body).hexdigest() == manifest_sha, day
+              manifest = json.loads(body)
+              assert manifest["date_oslo"] == day
+              report = audit_no_se_trot_discovery(manifest)
+              print("SOURCE_ONLY_NO_SE_TROT", day, json.dumps(report, sort_keys=True))
+              assert report["no_se_trot_candidate_count"] == expected_meetings, day
+              assert report["no_se_trot_captured_count"] == expected_meetings, day
+              assert report["no_se_trot_observed_pdf_race_count"] == expected_races, day
+              assert report["candidate_ids_not_collected"] == [], day
+              assert report["source_classification_conflicts"] == [], day
+              assert report["date_api_status"] in ("EMPTY_RESULT_ARRAY", "NOT_RECORDED"), day
+              assert report["independent_whole_day_denominator_verified"] is False
+              assert report["c1_coverage_eligible"] is False
+              assert report["pit_certified"] is False
+              assert report["bet_authorized"] is False
+          print("SOURCE_ONLY_NO_SE_TROT_OBSERVED_MEETINGS=15 RACES=142 DAYS=6 C1=BLOCKED")
+          PY
