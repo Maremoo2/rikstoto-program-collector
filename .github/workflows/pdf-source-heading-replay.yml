@@ -117,6 +117,8 @@ jobs:
                 numbers, audit["horses_verified"])
           PY
 
+      - name: Install exact original pypdf version (Nov 1 capture)
+        run: python -m pip install 'pypdf==6.21.4'
       - name: Replay all six Nov 1 physical meetings against original PDF and startlists
         env:
           GH_TOKEN: ${{ github.token }}
@@ -125,10 +127,12 @@ jobs:
           gh api "repos/${GH_REPO}/actions/artifacts/13072403701/zip" > "${RUNNER_TEMP}/nov01-all.zip"
           python - <<'PY'
           import hashlib
+          import io
           import json
           import os
           import zipfile
           from pathlib import Path
+          from pypdf import PdfReader
           from collector.pdf_program import parse_extended_pdf
           from collector.startlist_audit import reconcile_startlist
 
@@ -166,10 +170,17 @@ jobs:
                   pdf = z.read(pdf_path)
                   assert pdf.startswith(b"%PDF-")
                   assert hashlib.sha256(pdf).hexdigest() == pdf_receipts[pdf_path]
+                  # Recreate the exact archived extraction from original PDF
+                  # bytes, rather than trusting an arbitrary derived .txt file.
+                  extracted = "\\n\\n".join(
+                      page.extract_text() or "" for page in PdfReader(io.BytesIO(pdf)).pages
+                  )
+                  archived_text = z.read(text_path).decode("utf-8")
+                  assert extracted == archived_text, mid
                   starts = json.loads(z.read(starts_path))
                   assert starts["response"]["success"] is True, mid
                   parsed = parse_extended_pdf(
-                      z.read(text_path).decode("utf-8"), meeting_id=mid,
+                      extracted, meeting_id=mid,
                       date="2026-11-01",
                       url=f"original-archive:13072403701/{pdf_path}",
                       captured_at=starts["fetched_utc"])
