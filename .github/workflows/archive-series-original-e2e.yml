@@ -1,0 +1,61 @@
+name: P0 Longitudinal Original Source 14-Day Gate (read only)
+
+on:
+  pull_request:
+    paths:
+      - 'collector/archive_series_audit.py'
+      - 'tests/test_archive_series_audit.py'
+      - '.github/workflows/archive-series-original-e2e.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  archived-series:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download immutable four-day original source captures
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/${GH_REPO}/actions/artifacts/12726250010/zip" > "${RUNNER_TEMP}/oct27.zip"
+          gh api "repos/${GH_REPO}/actions/artifacts/12877782643/zip" > "${RUNNER_TEMP}/oct29.zip"
+          gh api "repos/${GH_REPO}/actions/artifacts/13032657626/zip" > "${RUNNER_TEMP}/oct31.zip"
+          gh api "repos/${GH_REPO}/actions/artifacts/13072403701/zip" > "${RUNNER_TEMP}/nov01.zip"
+      - name: Prove missing source days and unchanged non-certification from originals
+        run: |
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from collector.archive_series_audit import audit_series
+
+          root = Path(os.environ["RUNNER_TEMP"])
+          inputs = [root / n for n in
+                    ("oct27.zip", "oct29.zip", "oct31.zip", "nov01.zip")]
+          r = audit_series(inputs, start_date="2026-10-27",
+                           end_date="2026-11-01")
+          print("ORIGINAL_SERIES_DIAGNOSTIC", r)
+          assert r["status"] == "INSUFFICIENT_PREDECLARED_WINDOW"
+          assert r["predeclared_days"] == 6
+          assert r["unique_source_days"] == 4
+          assert r["missing_source_days"] == ["2026-10-28", "2026-10-30"]
+          assert r["days_with_verified_successful_raw_receipts"] == 1
+          assert r["days_with_unverifiable_or_missing_receipts"] == 3
+          assert r["by_day"]["2026-10-27"]["unrecoverable_legacy_json"] == 67
+          assert r["by_day"]["2026-10-29"]["unrecoverable_legacy_json"] == 51
+          assert r["by_day"]["2026-10-31"]["unrecoverable_legacy_json"] == 80
+          assert r["by_day"]["2026-11-01"]["original_json_verified"] == 73
+          assert r["by_day"]["2026-11-01"]["original_pdf_verified"] == 7
+          assert r["archive_errors"] == []
+          assert r["independent_whole_day_denominator_proven"] is False
+          assert r["prospective_pit_certified"] is False
+          assert r["operational_14_day_completion_certified"] is False
+          assert r["model_training_or_bet_authority"] is False
+          PY
