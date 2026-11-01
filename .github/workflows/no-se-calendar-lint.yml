@@ -1,0 +1,24 @@
+name: NO-SE calendar Python lint (read only)
+
+on:
+  pull_request:
+    paths:
+      - 'collector/no_se_calendar.py'
+      - 'tests/test_no_se_calendar.py'
+      - '.github/workflows/no-se-calendar-lint.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  no-se-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install ruff==0.14.4
+      - name: Ruff on newly authored C-DEV-02 code
+        run: ruff check collector/no_se_calendar.py tests/test_no_se_calendar.py
