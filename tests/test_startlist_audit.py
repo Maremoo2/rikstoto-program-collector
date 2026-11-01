@@ -1,6 +1,7 @@
 """Unit tests for exact PDF/startlist horse and scratch reconciliation."""
 from collector.startlist_audit import (
     normalized_horse_name, reconcile_startlist, unresolved_placeholder_name,
+    stage_unverified_positive_scratch_signals,
 )
 
 
@@ -196,3 +197,143 @@ def test_placeholder_grammar_is_narrow_and_normalized():
     assert not unresolved_placeholder_name("Hästmann 1")
     assert not unresolved_placeholder_name("Champion Horse 1")
     assert not unresolved_placeholder_name("Häst 31")
+
+
+def test_preliminary_positive_signal_never_confirms_scratch_or_active_state():
+    race = doc()
+    event = {
+        "race_number": 6, "horse_number": 2, "horse_name": "Lesja Loke",
+        "source_path": "$.races[0].starts[1]", "evidence": {"isScratched": True},
+    }
+    stage_unverified_positive_scratch_signals(race, [event])
+    assert race["scratch_signal_candidates"] == [{
+        **event, "verification": "UNVERIFIED_POSITIVE_SIGNAL",
+    }]
+    assert race["scratches"] == []
+    assert all(h["scratched"] is None and h["scratch_state"] == "UNVERIFIED"
+               for h in race["entrants"])
+    assert race["qa"]["active_count"] is None
+    assert race["qa"]["scratched_count"] is None
+    assert race["qa"]["scratches_complete_as_of_snapshot"] is False
+
+
+def test_missing_matching_startlist_cannot_promote_positive_signal():
+    race = doc()
+    event = {"race_number": 6, "horse_number": 2,
+             "horse_name": "Lesja Loke", "evidence": {"isScratched": True}}
+    stage_unverified_positive_scratch_signals(race, [event])
+    source = starts()
+    source["result"]["6"][1]["horseName"] = "Wrong Horse"
+    result = reconcile_startlist([race], source)
+    assert result["status"] == "PARTIAL_OR_UNVERIFIED"
+    assert result["confirmed_scratches"] == 0
+    assert all(h["scratched"] is None and h["scratch_state"] == "UNVERIFIED"
+               for h in race["entrants"])
+    assert race["scratches"] == []
+    assert race["scratch_signal_candidates"][0]["verification"] == (
+        "UNVERIFIED_POSITIVE_SIGNAL"
+    )
+
+
+def test_positive_signal_from_wrong_race_is_not_staged():
+    race = doc()
+    event = {"race_number": 7, "horse_number": 2, "horse_name": "Lesja Loke",
+             "evidence": {"isScratched": True}}
+    stage_unverified_positive_scratch_signals(race, [event])
+    assert race["scratch_signal_candidates"] == []
+    assert race["qa"]["scratch_verification"] == "UNVERIFIED_NO_POSITIVE_SIGNAL"
+    assert all(h["scratched"] is None for h in race["entrants"])
+
+
+def test_full_field_reconciliation_promotes_scratch_only_after_checks():
+    race = doc()
+    event = {"race_number": 6, "horse_number": 2,
+             "horse_name": "Lesja Loke", "evidence": {"isScratched": True}}
+    stage_unverified_positive_scratch_signals(race, [event])
+    result = reconcile_startlist([race], starts(), captured_at="2026-11-01T06:19:20Z")
+    assert result["status"] == "MATCHED_AS_OF_SNAPSHOT"
+    assert result["horses_verified"] == 2
+    assert result["confirmed_scratches"] == 1
+    assert race["entrants"][0]["scratched"] is False
+    assert race["entrants"][1]["scratched"] is True
+    assert race["entrants"][1]["scratch_state"] == "SCRATCHED_AS_OF_SNAPSHOT"
+    assert race["qa"]["scratches_complete_as_of_snapshot"] is True
+    assert race["scratch_signal_candidates"][0]["verification"] == (
+        "UNVERIFIED_POSITIVE_SIGNAL"
+    )
+
+
+def test_extra_malformed_startlist_race_cannot_disappear_from_denominator():
+    race = doc()
+    stage_unverified_positive_scratch_signals(race, [])
+    source = starts()
+    source["result"]["7"] = {"error": "unrecognized shape"}
+    output = reconcile_startlist([race], source)
+    assert output["status"] == "UNVERIFIED"
+    assert output["verified_race_numbers"] == []
+    assert output["mismatches"] == [{
+        "code": "UNRECOGNIZED_STARTLIST_RACE_KEYS", "keys": ["7"],
+    }]
+    assert all(h["scratched"] is None for h in race["entrants"])
+
+
+def test_alias_race_key_zero_padded_cannot_hide_second_api_race():
+    race = doc()
+    stage_unverified_positive_scratch_signals(race, [])
+    source = starts()
+    source["result"]["06"] = list(source["result"]["6"])
+    output = reconcile_startlist([race], source)
+    assert output["status"] == "UNVERIFIED"
+    assert output["mismatches"] == [{
+        "code": "UNRECOGNIZED_STARTLIST_RACE_KEYS", "keys": ["06"],
+    }]
+    assert all(h["scratch_state"] == "UNVERIFIED" for h in race["entrants"])
+
+
+def test_row_declared_race_number_conflict_blocks_matching_program_number():
+    race = doc()
+    stage_unverified_positive_scratch_signals(race, [])
+    source = starts()
+    source["result"]["6"][1]["raceNumber"] = 7
+    output = reconcile_startlist([race], source)
+    assert output["status"] == "PARTIAL_OR_UNVERIFIED"
+    assert output["race_matches"] == 0
+    assert output["mismatches"][0]["code"] == "HORSE_NUMBER_OR_FLAG_MISMATCH"
+    assert output["mismatches"][0]["malformed_api_rows"] is True
+    assert all(h["scratched"] is None for h in race["entrants"])
+
+
+def test_row_declared_race_number_malformed_type_fails_closed():
+    race = doc()
+    stage_unverified_positive_scratch_signals(race, [])
+    source = starts()
+    source["result"]["6"][0]["raceNumber"] = "6"
+    output = reconcile_startlist([race], source)
+    assert output["status"] == "PARTIAL_OR_UNVERIFIED"
+    assert output["verified_race_numbers"] == []
+
+
+def test_blank_name_in_startlist_not_matching_empty_identity():
+    race = doc()
+    race["entrants"][0]["name"] = "!!!"
+    stage_unverified_positive_scratch_signals(race, [])
+    source = starts()
+    source["result"]["6"][0]["horseName"] = "!!!"
+    output = reconcile_startlist([race], source)
+    assert output["status"] == "PARTIAL_OR_UNVERIFIED"
+    assert output["horses_verified"] == 0
+    assert all(h["scratched"] is None for h in race["entrants"])
+
+
+def test_all_runner_scratched_anomaly_does_not_confirm_scratch():
+    race = doc()
+    event = {"race_number": 6, "horse_number": 2,
+             "evidence": {"isScratched": True}}
+    stage_unverified_positive_scratch_signals(race, [event])
+    source = starts()
+    source["result"]["6"][0]["isScratched"] = True
+    output = reconcile_startlist([race], source)
+    assert output["status"] == "PARTIAL_OR_UNVERIFIED"
+    assert output["confirmed_scratches"] == 0
+    assert race["qa"]["scratch_verification"] == "UNVERIFIED_ALL_RUNNERS_FLAGGED"
+    assert all(h["scratched"] is None for h in race["entrants"])
