@@ -37,7 +37,8 @@ def sample(*, date_api_status="EMPTY_RESULT_ARRAY", max_meetings=None):
     return {
         "date_oslo": DAY, "automatically_discovered_meetings": candidate_ids,
         "manually_seeded_meetings": [], "meetings": meetings,
-        "homepage_spa_racedays": {"meetings": typed},
+        "homepage_spa_racedays": {"api_path": "/api/racedays",
+                                   "meetings": typed},
         "public_racedays_api": typed, "calendar_racedays": {},
         "calendar_source_diagnostic": {"status": date_api_status,
                                        "date_coverage_verified": False},
@@ -162,3 +163,22 @@ def test_mismatched_meeting_identity_fails_closed():
     r = audit_no_se_trot_discovery(m)
     assert "BT_NR_" + DAY in r["source_classification_conflicts"]
     assert "BT_NR_" + DAY not in r["no_se_trot_physical_candidate_ids"]
+
+
+def test_homepage_unrecognized_endpoint_cannot_supply_typed_candidates():
+    m = sample()
+    m["homepage_spa_racedays"]["api_path"] = None
+    m["public_racedays_api"] = {}
+    r = audit_no_se_trot_discovery(m)
+    assert r["no_se_trot_candidate_count"] == 0
+    assert "NO_TYPED_NO_SE_TROT_CANDIDATES" in r["blockers"]
+    assert r["c1_coverage_eligible"] is False
+
+
+def test_date_api_missing_known_target_is_explicit_disagreement():
+    m = sample(date_api_status="TARGET_DAY_ENTRIES_PRESENT")
+    key = "BT_NR_" + DAY
+    m["calendar_racedays"] = {key: copy.deepcopy(m["public_racedays_api"][key])}
+    r = audit_no_se_trot_discovery(m)
+    assert r["candidate_ids_absent_from_date_api"] == ["S1_NR_" + DAY]
+    assert "SOURCE_CANDIDATES_ABSENT_FROM_DATE_API" in r["blockers"]
