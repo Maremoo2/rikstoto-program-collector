@@ -66,3 +66,53 @@ jobs:
               assert all("SCRATCHES_UNVERIFIED" in r["qa"]["warnings"]
                          for r in parsed["races"])
           PY
+
+      - name: Replay November 1st Øvrevoll original PDF and 9-race startlist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh api "repos/${GH_REPO}/actions/artifacts/13072403701/zip" > "${RUNNER_TEMP}/nov01.zip"
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import zipfile
+          from pathlib import Path
+          from collector.pdf_program import parse_extended_pdf
+          from collector.startlist_audit import reconcile_startlist
+
+          day = "2026-11-01"
+          key = "OV_NR_2026-11-01"
+          with zipfile.ZipFile(Path(os.environ["RUNNER_TEMP"]) / "nov01.zip") as archive:
+              paths = [name for name in archive.namelist()
+                       if name.endswith(f"/meetings/{key}/full_program.txt")]
+              assert len(paths) == 1, paths
+              text_path = paths[0]
+              pdf_path = text_path.replace("full_program.txt", "full_program.pdf")
+              assert hashlib.sha256(archive.read(pdf_path)).hexdigest() == (
+                  "df4e8659ff2744879edbf6035ede52ea45ff87966b9f051384688f048c8a0e10"
+              )
+              original_text = archive.read(text_path).decode("utf-8")
+              starts_path = text_path.replace("full_program.txt", "starts.json")
+              source_wrapper = json.loads(archive.read(starts_path))
+          assert source_wrapper["response"]["success"] is True
+          parsed = parse_extended_pdf(
+              original_text, meeting_id=key, date=day,
+              url=f"original-archive:13072403701/{pdf_path}",
+              captured_at="2026-11-01T06:20:00+00:00")
+          numbers = [r["race"]["race_number"] for r in parsed["races"]]
+          assert numbers == list(range(1, 10)), numbers
+          assert parsed["races"][1]["race"]["race_number_source"] == "pdf_heading_number"
+          assert sum(len(r["entrants"]) for r in parsed["races"]) == 70
+          audit = reconcile_startlist(
+              parsed["races"], source_wrapper["response"],
+              captured_at=source_wrapper["fetched_utc"])
+          assert audit["status"] == "MATCHED_AS_OF_SNAPSHOT", audit
+          assert audit["race_matches"] == 9 and audit["horses_verified"] == 70, audit
+          assert parsed["qa"]["status"] == "REVIEW_REQUIRED"
+          # Snapshot source proves field reconciliation at capture, NOT whole-day
+          # completeness, immutable original publication time, or T-4 PIT.
+          print("ORIGINAL_OVREVOLL_2026_11_01_RECONCILED_AS_OF_SNAPSHOT",
+                numbers, audit["horses_verified"])
+          PY
