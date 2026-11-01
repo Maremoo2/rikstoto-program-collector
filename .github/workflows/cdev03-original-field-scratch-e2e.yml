@@ -42,6 +42,7 @@ jobs:
           from collector.archive_integrity_audit import audit_archive_zip
           from collector.daily import scratch_signals
           from collector.pdf_program import parse_extended_pdf
+          from collector.no_se_calendar import audit_no_se_trot_discovery
           from collector.startlist_audit import (
               reconcile_startlist, stage_unverified_positive_scratch_signals,
           )
@@ -56,7 +57,11 @@ jobs:
           assert verified["pit_certified"] is False
           totals = dict(meetings_checked=0, races_reparsed=0, horses_reparsed=0,
                         snapshot_races_verified=0, snapshot_races_unverified=0,
-                        source_unavailable_meetings=0)
+                        source_unavailable_meetings=0,
+                        no_se_trot_meetings_checked=0,
+                        no_se_trot_races_reparsed=0,
+                        no_se_trot_snapshot_races_verified=0,
+                        no_se_trot_horses_reparsed=0)
           with zipfile.ZipFile(path) as arc:
               manifest_paths = [n for n in arc.namelist() if n.endswith("/manifest.json")]
               assert len(manifest_paths) == 1
@@ -64,6 +69,10 @@ jobs:
               manifest_sha = hashlib.sha256(manifest_bytes).hexdigest()
               assert manifest_sha == "9e3e5731e05b51b34593033d9a958faa5be10496f7423e32bc3a1ca788438751"
               day = json.loads(manifest_bytes)
+              no_se_source = audit_no_se_trot_discovery(day)
+              target_ids = set(no_se_source["no_se_trot_physical_candidate_ids"])
+              assert target_ids == {"MO_NR_2026-11-01", "S1_NR_2026-11-01"}
+              assert no_se_source["independent_whole_day_denominator_verified"] is False
               root = manifest_paths[0][:-len("manifest.json")]
               paths = set(arc.namelist())
               for entry in day["meetings"]:
@@ -100,6 +109,13 @@ jobs:
                   audit = reconcile_startlist(docs, starts)
                   good = set(audit["verified_race_numbers"])
                   totals["meetings_checked"] += 1
+                  if mid in target_ids:
+                      totals["no_se_trot_meetings_checked"] += 1
+                      totals["no_se_trot_races_reparsed"] += len(docs)
+                      totals["no_se_trot_snapshot_races_verified"] += len(good)
+                      totals["no_se_trot_horses_reparsed"] += sum(
+                          len(d["entrants"]) for d in docs
+                      )
                   totals["races_reparsed"] += len(docs)
                   totals["horses_reparsed"] += sum(len(d["entrants"]) for d in docs)
                   totals["snapshot_races_verified"] += len(good)
@@ -120,9 +136,17 @@ jobs:
                                     "status": audit["status"],
                                     "mismatches": audit["mismatches"]},
                                    ensure_ascii=False, sort_keys=True))
-          assert totals["meetings_checked"] >= 1, totals
-          assert totals["races_reparsed"] > 0, totals
-          assert totals["horses_reparsed"] > 0, totals
+          # SHA-pinned original Nov 1 cohort: exact first-party PDF/starts
+          # baseline, NEVER the independent complete-day C3 denominator.
+          assert totals["meetings_checked"] == 6, totals
+          assert totals["races_reparsed"] == 56, totals
+          assert totals["horses_reparsed"] == 605, totals
+          assert totals["snapshot_races_verified"] == 54, totals
+          assert totals["snapshot_races_unverified"] == 2, totals
+          assert totals["no_se_trot_meetings_checked"] == 2, totals
+          assert totals["no_se_trot_races_reparsed"] == 21, totals
+          assert totals["no_se_trot_snapshot_races_verified"] == 21, totals
+          assert totals["no_se_trot_horses_reparsed"] == 238, totals
           print("CDEV03_ORIGINAL_OFFLINE_SOURCE_REPLAY", json.dumps(totals, sort_keys=True))
           print("INDEPENDENT_C3_FIELD_COVERAGE=UNVERIFIED C1=BLOCKED C6_PIT=BLOCKED")
           PY
