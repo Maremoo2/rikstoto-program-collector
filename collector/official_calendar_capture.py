@@ -33,7 +33,7 @@ SCHEMA = "collector_cdev01_official_http_capture_v1"
 USER_AGENT = "Collector-C1-Source-Evidence/1.0"
 DEFAULT_OFFICIAL_URLS = {
     "NO": "https://old.travsport.no/Sport/Terminliste/",
-    "SE": "https://www.travsport.se/kalender",
+    "SE": "https://www.travsport.se/",
 }
 MAX_HTML = 8_000_000
 MAX_ROBOTS = 120_000
