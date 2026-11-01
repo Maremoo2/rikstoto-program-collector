@@ -20,7 +20,8 @@ def _maps(manifest: dict) -> dict[str, dict]:
     if not isinstance(homepage, dict):
         homepage = {}
     roots = (
-        homepage.get("meetings"),
+        homepage.get("meetings") if homepage.get("api_path") == "/api/racedays"
+        else {},
         manifest.get("public_racedays_api"),
         manifest.get("calendar_racedays"),
     )
