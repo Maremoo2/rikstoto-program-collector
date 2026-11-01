@@ -105,6 +105,7 @@ def _one_pdf(archive: zipfile.ZipFile, meeting: str, pdf_sha: str,
         "expected_pages": pages, "original_pdf_sha256_verified": False,
         "page_count_verified": False, "pdf_request_receipt_correlated": False,
         "source_run_identity_verified": False,
+        "meeting_scope_from_typed_manifest": "UNKNOWN",
         "derived_text_member_present": False,
         "independent_horse_history_owner_verified": False,
         "independent_gold_fields_accepted": 0,
@@ -139,6 +140,17 @@ def _one_pdf(archive: zipfile.ZipFile, meeting: str, pdf_sha: str,
         result["errors"].append("PDF_MISSING_DUPLICATE_OR_FOREIGN_RUN")
         return result
     result["source_run_identity_verified"] = True
+    # A PDF meeting ID or X1/S-prefix does NOT establish a physical
+    # racetrack. Only typed first-party manifest source can classify it.
+    typed = [row for row in manifest.get("meetings", [])
+             if isinstance(row, dict) and row.get("meeting_id") == meeting
+             ] if isinstance(manifest.get("meetings"), list) else []
+    if len(typed) == 1:
+        marker = typed[0].get("is_multi_track_product")
+        if marker is True:
+            result["meeting_scope_from_typed_manifest"] = "COMPOSITE_PRODUCT"
+        elif marker is False:
+            result["meeting_scope_from_typed_manifest"] = "PHYSICAL_MEETING"
     if archive.getinfo(expected_path).file_size > MAX_PDF_BYTES:
         result["errors"].append("PDF_EXCEEDS_READONLY_BYTE_LIMIT")
         return result
@@ -206,6 +218,9 @@ def audit_frozen_holdout_sources(
         "pdf_page_counts_verified": 0,
         "pdf_request_receipts_correlated": 0,
         "captured_programs_with_derived_text": 0,
+        "typed_physical_meeting_pdf_programs": 0,
+        "typed_composite_product_pdf_programs": 0,
+        "meeting_type_unverified_pdf_programs": 0,
         "sample_rows_independently_gold_verified": 0,
         "data004e_holdout_gold_pairs_accepted": 0,
         "data004e_holdout_gold_pairs_total": 390,
@@ -274,6 +289,13 @@ def audit_frozen_holdout_sources(
                     report["pdf_request_receipts_correlated"] += 1
                 if one["derived_text_member_present"]:
                     report["captured_programs_with_derived_text"] += 1
+                scope = one["meeting_scope_from_typed_manifest"]
+                if scope == "PHYSICAL_MEETING":
+                    report["typed_physical_meeting_pdf_programs"] += 1
+                elif scope == "COMPOSITE_PRODUCT":
+                    report["typed_composite_product_pdf_programs"] += 1
+                else:
+                    report["meeting_type_unverified_pdf_programs"] += 1
                 if one["errors"]:
                     report["errors"].extend(
                         f"{source['meeting']}:{issue}" for issue in one["errors"])
