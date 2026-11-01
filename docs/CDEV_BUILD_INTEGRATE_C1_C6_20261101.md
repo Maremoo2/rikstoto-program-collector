@@ -50,7 +50,7 @@ review access terms and robots, then run only when explicitly authorized:
     python -m collector.official_calendar_capture capture \
       --day 2026-11-02 --private-root /private/c1-sources \
       --no-url https://old.travsport.no/Sport/Terminliste/ \
-      --se-url https://www.travsport.se/kalender
+      --se-url https://www.travsport.se/
 
 If either provider blocks robots/network or the page is not UTF-8,
 the attempt blocks. A successful original-byte capture is still not
