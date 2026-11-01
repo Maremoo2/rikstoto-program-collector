@@ -4,7 +4,10 @@ on:
   pull_request:
     paths:
       - 'collector/holdout_pdf_source_replay.py'
+      - 'collector/holdout_pdf_projection_audit.py'
+      - 'docs/CDEV04_24_PDF_TEXT_PROJECTION_20261101.md'
       - 'tests/test_holdout_pdf_source_replay.py'
+      - 'tests/test_holdout_pdf_projection_audit.py'
       - 'docs/CDEV04_24_ORIGINAL_PDF_COHORT_20261101.md'
       - '.github/workflows/cdev04-24-original-pdf-cohort.yml'
 
@@ -24,9 +27,9 @@ jobs:
       - name: Install source-only test dependencies
         run: python -m pip install -r requirements-dev.txt ruff==0.14.4
       - name: Lint source-only auditor and negative tests
-        run: ruff check collector/holdout_pdf_source_replay.py tests/test_holdout_pdf_source_replay.py
+        run: ruff check collector/holdout_pdf_source_replay.py collector/holdout_pdf_projection_audit.py tests/test_holdout_pdf_source_replay.py tests/test_holdout_pdf_projection_audit.py
       - name: Synthetic archive tamper, missing source and no-false-C4 tests
-        run: python -m pytest -q tests/test_holdout_pdf_source_replay.py
+        run: python -m pytest -q tests/test_holdout_pdf_source_replay.py tests/test_holdout_pdf_projection_audit.py
 
       - name: Fetch frozen public Betting source-PDF index by pinned commit
         env:
@@ -104,4 +107,59 @@ jobs:
           assert report["independent_complete_day_denominator_verified"] is False
           assert report["c6_t_minus_4_pit_certified"] is False
           assert report["bet_authorized"] is False
+          PY
+
+      - name: Audit 24 original PDF text projections against existing source parser (no gold)
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m collector.holdout_pdf_projection_audit \
+            --source-index "${RUNNER_TEMP}/betting-original-pdf-evidence.json" \
+            --expected-index-blob-sha1 e39363275abaffae4044b41e5c52f1765c26790e \
+            --archive "12135567920=${RUNNER_TEMP}/original-12135567920.zip" \
+            --archive "12152059609=${RUNNER_TEMP}/original-12152059609.zip" \
+            --archive "12211357452=${RUNNER_TEMP}/original-12211357452.zip" \
+            --archive "12219187865=${RUNNER_TEMP}/original-12219187865.zip" \
+            --archive "12218163952=${RUNNER_TEMP}/original-12218163952.zip" \
+            --archive "12219320854=${RUNNER_TEMP}/original-12219320854.zip" \
+            --archive "12210589268=${RUNNER_TEMP}/original-12210589268.zip" \
+            --output "${RUNNER_TEMP}/cdev04-24-pdf-text-projection-report.json"
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          report = json.loads((Path(os.environ["RUNNER_TEMP"]) /
+                              "cdev04-24-pdf-text-projection-report.json").read_text())
+          summary = {
+              "status": report["status"],
+              "original_pdf_corpus_verified": report["source_only_original_pdf_corpus_verified"],
+              "reproduced_pdf_text_programs": report["pdf_text_projection_verified"],
+              "blocked_or_mismatched_programs": report["pdf_text_projection_blocked"],
+              "missing_text": report["pdf_text_projection_missing"],
+              "candidate_history_rows_unverified": report["history_candidate_rows_from_reproduced_text"],
+              "error_categories": report["projection_error_counts"],
+              "errors": report["errors"],
+              "accepted_gold": report["data004e_390_gold_pairs_accepted"],
+              "C1": report["independent_no_se_full_day_denominator_verified"],
+              "C6_PIT": report["c6_t_minus_4_pit_certified"],
+              "BET": report["bet_authorized"],
+          }
+          print("CDEV04_ORIGINAL_24_PDF_TEXT_PROJECTION_DIAGNOSTIC", json.dumps(summary, sort_keys=True))
+          assert report["source_only_original_pdf_corpus_verified"] is True
+          assert len(report["program_diagnostics"]) == 24
+          assert report["status"] == "COMPLETE_ORIGINAL_PDF_TEXT_PROJECTION_SOURCE_ONLY"
+          assert report["pdf_text_projection_verified"] == 24
+          assert report["pdf_text_projection_blocked"] == 0
+          assert report["pdf_text_projection_missing"] == 0
+          assert report["errors"] == []
+          assert report["history_candidate_rows_from_reproduced_text"] > 0
+          assert report["independent_pdf_page_visual_review"] is False
+          assert report["data004e_390_gold_pairs_accepted"] == 0
+          assert report["data004e_gold_verified"] is False
+          assert report["independent_no_se_full_day_denominator_verified"] is False
+          assert report["c6_t_minus_4_pit_certified"] is False
+          assert report["bet_authorized"] is False
+          assert report["hq_accepted"] is False
+          print("CDEV04_SOURCE_TEXT_PARITY_GATE=PASS_SOURCE_ONLY; no history gold, PIT, BET or HQ authority")
           PY
