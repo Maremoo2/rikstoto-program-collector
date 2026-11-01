@@ -8,6 +8,7 @@ on:
       - 'collector/pit_revision_chain.py'
       - 'collector/source_integrity.py'
       - 'tests/test_official_calendar_capture.py'
+      - 'tests/test_official_calendar_partial_capture.py'
       - 'tests/test_pit_revision_chain.py'
       - 'docs/CDEV_BUILD_INTEGRATE_C1_C6_20261101.md'
       - '.github/workflows/cdev-build-official-capture.yml'
@@ -30,7 +31,8 @@ jobs:
       - name: Validate added source-acquisition and old C1 contracts
         run: |
           ruff check collector/official_calendar_capture.py collector/official_calendar_integration.py collector/pit_revision_chain.py collector/source_integrity.py tests/test_official_calendar_capture.py tests/test_pit_revision_chain.py
-          python -m pytest -q tests/test_official_calendar_capture.py tests/test_pit_revision_chain.py tests/test_independent_day_window.py tests/test_p0_source_integrity.py
+          ruff check tests/test_official_calendar_partial_capture.py
+          python -m pytest -q tests/test_official_calendar_capture.py tests/test_official_calendar_partial_capture.py tests/test_pit_revision_chain.py tests/test_independent_day_window.py tests/test_p0_source_integrity.py
       - name: Replay immutable Nov 1 Collector archive – no independent original official sources
         env:
           GH_TOKEN: ${{ github.token }}
