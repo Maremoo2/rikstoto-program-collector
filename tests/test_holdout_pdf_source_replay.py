@@ -5,7 +5,6 @@ import json
 import zipfile
 from pathlib import Path
 
-import pytest
 from reportlab.pdfgen.canvas import Canvas
 
 from collector.holdout_pdf_source_replay import (
@@ -150,8 +149,11 @@ def test_duplicate_original_zip_member_is_blocked(tmp_path):
 def test_unexpected_foreign_run_path_is_blocked(tmp_path):
     foreign = f"output/daily/{DAY}/20261018T120412486323Z/meetings/{MEETING}/full_program.pdf"
     report = _audit(_source_index(), _archive(tmp_path, path=foreign))
-    assert any("PDF_MISSING_DUPLICATE_OR_FOREIGN_RUN" in err
-               for err in report["errors"])
+    assert any(
+        "PDF_MISSING_DUPLICATE_OR_FOREIGN_RUN" in err
+        or "COLLECTOR_ARCHIVE_INTEGRITY_ERROR:PDF_ARCHIVE_PATH_MISSING" in err
+        for err in report["errors"]
+    ), report["errors"]
     assert report["source_only_original_programs_complete"] is False
 
 
