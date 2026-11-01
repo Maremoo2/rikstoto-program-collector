@@ -1,5 +1,6 @@
 """C-DEV-04 strict shadow-only source history diagnostics, no 390-cell gold."""
 import hashlib
+import json
 import zipfile
 
 import pytest
@@ -44,6 +45,8 @@ def _archive(tmp_path, raw=EXCERPT, *, two_pdfs=False, no_text=False):
     path = tmp_path / "original.zip"
     pdf_member = f"output/daily/{DAY}/run/meetings/{MEETING}/full_program.pdf"
     with zipfile.ZipFile(path, "w") as out:
+        out.writestr(f"output/daily/{DAY}/run/manifest.json",
+                     json.dumps({"date_oslo": DAY, "run_id": "run"}))
         out.writestr(pdf_member, PDF)
         if two_pdfs:
             out.writestr(f"{DAY}/run/meetings/{MEETING}/full_program.pdf", PDF)
@@ -138,7 +141,7 @@ def test_missing_original_pdf_text_companion_is_blocked(tmp_path):
 
 
 def test_duplicate_archive_original_pdf_is_blocked(tmp_path):
-    with pytest.raises(ValueError, match="duplicate original physical PDF"):
+    with pytest.raises(ValueError, match="duplicate or foreign-capture PDF"):
         replay_original_archive(
             _archive(tmp_path, two_pdfs=True),
             meeting_id=MEETING, date_oslo=DAY, expected_pdf_sha256=PDF_SHA,
@@ -184,3 +187,53 @@ def test_histories_do_not_become_user_visible_bets_or_prospective_pit():
     assert result["pit_certified"] is False
     assert result["production_parser_changed"] is False
     assert result["bet_authorized"] is False
+
+
+def test_manifest_wrong_date_or_capture_root_rejects_hashed_pdf(tmp_path):
+    path = _archive(tmp_path)
+    with zipfile.ZipFile(path) as z:
+        items = {name: z.read(name) for name in z.namelist()}
+    manifest = f"output/daily/{DAY}/run/manifest.json"
+    payload = json.loads(items[manifest])
+    payload["date_oslo"] = "2026-10-28"
+    items[manifest] = json.dumps(payload).encode("utf-8")
+    with zipfile.ZipFile(path, "w") as z:
+        for name, body in items.items():
+            z.writestr(name, body)
+    with pytest.raises(ValueError, match="manifest day/run mismatch"):
+        replay_original_archive(
+            path, meeting_id=MEETING, date_oslo=DAY,
+            expected_pdf_sha256=PDF_SHA,
+        )
+
+
+def test_cross_capture_pdf_cannot_borrow_valid_sha(tmp_path):
+    path = _archive(tmp_path)
+    with zipfile.ZipFile(path) as z:
+        items = {name: z.read(name) for name in z.namelist()}
+    pdf_member = f"output/daily/{DAY}/run/meetings/{MEETING}/full_program.pdf"
+    original = items.pop(pdf_member)
+    items[f"output/daily/{DAY}/other-run/meetings/{MEETING}/full_program.pdf"] = original
+    with zipfile.ZipFile(path, "w") as z:
+        for name, body in items.items():
+            z.writestr(name, body)
+    with pytest.raises(ValueError, match="foreign-capture PDF"):
+        replay_original_archive(
+            path, meeting_id=MEETING, date_oslo=DAY,
+            expected_pdf_sha256=PDF_SHA,
+        )
+
+
+def test_missing_archived_manifest_cannot_attest_pdf(tmp_path):
+    path = _archive(tmp_path)
+    with zipfile.ZipFile(path) as z:
+        items = {name: z.read(name) for name in z.namelist()
+                 if not name.endswith("/manifest.json")}
+    with zipfile.ZipFile(path, "w") as z:
+        for name, body in items.items():
+            z.writestr(name, body)
+    with pytest.raises(ValueError, match="source archive manifest"):
+        replay_original_archive(
+            path, meeting_id=MEETING, date_oslo=DAY,
+            expected_pdf_sha256=PDF_SHA,
+        )
