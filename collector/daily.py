@@ -17,12 +17,12 @@ import io
 import json
 import re
 import sys
-from datetime import date as Date, datetime, timedelta, timezone
+from datetime import date as Date, datetime, timezone
 from pathlib import Path
 from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
-from .pipeline import DOMAIN, USER_AGENT, check_robots, source_allowed
+from .pipeline import DOMAIN, check_robots, source_allowed
 from .pdf_program import parse_extended_pdf
 from .calendar_audit import calendar_window, calendar_racedays, diagnose_calendar_response
 from .startlist_audit import reconcile_startlist, stage_unverified_positive_scratch_signals
