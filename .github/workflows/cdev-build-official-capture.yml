@@ -1,0 +1,83 @@
+name: C-DEV Build integration - official NO SE source intake (offline negative CI)
+
+on:
+  pull_request:
+    paths:
+      - 'collector/official_calendar_capture.py'
+      - 'collector/source_integrity.py'
+      - 'tests/test_official_calendar_capture.py'
+      - 'docs/CDEV_BUILD_INTEGRATE_C1_C6_20261101.md'
+      - '.github/workflows/cdev-build-official-capture.yml'
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  original-official-source-intake:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install tests and pinned lint
+        run: python -m pip install -r requirements-dev.txt ruff==0.14.4
+      - name: Validate added source-acquisition and old C1 contracts
+        run: |
+          ruff check collector/official_calendar_capture.py collector/source_integrity.py tests/test_official_calendar_capture.py
+          python -m pytest -q tests/test_official_calendar_capture.py tests/test_independent_day_window.py tests/test_p0_source_integrity.py
+      - name: Replay immutable Nov 1 Collector archive – no independent original official sources
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: gh api "repos/${GH_REPO}/actions/artifacts/13072403701/zip" > "${RUNNER_TEMP}/original-nov01.zip"
+      - name: Original Nov 1 archive must not invent C1 coverage or C6 PIT
+        run: |
+          python - <<'PY'
+          import hashlib
+          import json
+          import os
+          import zipfile
+          from pathlib import Path
+          from collector.archive_integrity_audit import audit_archive_zip
+          from collector.independent_day_window import audit_window
+          from collector.pit_source_snapshot import audit_original_pdf_capture_tminus4
+
+          original = Path(os.environ["RUNNER_TEMP"]) / "original-nov01.zip"
+          audit = audit_archive_zip(original)
+          assert audit["errors"] == [], audit
+          assert audit["json_raw_sha_verified"] == 73
+          assert audit["pdf_raw_sha_verified"] == 7
+          with zipfile.ZipFile(original) as archive:
+              members = [m for m in archive.namelist() if m.endswith("/manifest.json")]
+              assert len(members) == 1
+              body = archive.read(members[0])
+              assert hashlib.sha256(body).hexdigest() == (
+                  "9e3e5731e05b51b34593033d9a958faa5be10496f7423e32bc3a1ca788438751")
+          manifest = json.loads(body)
+          assert manifest["calendar_source_diagnostic"]["status"] == "EMPTY_RESULT_ARRAY"
+          # Official NO/SE calendar ORIGINAL HTTP pages for Nov 1..3 are NOT in
+          # this historical Collector archive. Captured third-party pages
+          # from today cannot retroactively make Nov 1 source-complete.
+          blocked = audit_window("2026-11-01", {"2026-11-01": manifest}, {})
+          assert blocked["status"] == "BLOCKED_INDEPENDENT_FULL_DAY_DENOMINATOR"
+          assert blocked["days"][0]["missing_official_bundle"] is True
+          assert all(row["status"] == "BLOCKED_MISSING_EVIDENCE"
+                     for row in blocked["days"])
+          assert blocked["coverage_percentage"] is None
+          assert blocked["c1_14_day_coverage_eligible"] is False
+          pit = audit_original_pdf_capture_tminus4(original)
+          assert pit["source_candidate_meetings"] == 2
+          assert len(pit["races"]) == 21
+          assert pit["c6_pit_certified"] is False
+          assert pit["independent_full_day_no_se_denominator_verified"] is False
+          assert pit["bet_authorized"] is False
+          print("CDEV_BUILD_C1_SOURCE_MISSING", json.dumps({
+              "source_nov01": "ORIGINAL_JSON_73_PDF_7",
+              "independent_official_page_origins": "NOT_IN_ORIGINAL_ARCHIVE",
+              "calendar_day_plus_two": blocked["status"],
+              "C1": False, "C6": False, "HQ": False,
+          }, sort_keys=True))
+          PY
