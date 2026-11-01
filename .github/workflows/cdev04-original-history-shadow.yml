@@ -20,7 +20,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install pytest ruff==0.14.4
+      - run: python -m pip install -r requirements-dev.txt ruff==0.14.4
       - name: Lint new Collector-only shadow code
         run: ruff check collector/history_shadow.py tests/test_history_shadow.py
       - name: Test negative source and abstention fixtures
@@ -33,7 +33,7 @@ jobs:
           gh api "repos/${GH_REPO}/actions/artifacts/12480651523/zip" > "${RUNNER_TEMP}/oct23.zip"
           gh api "repos/${GH_REPO}/actions/artifacts/12726250010/zip" > "${RUNNER_TEMP}/oct27.zip"
           gh api "repos/${GH_REPO}/actions/artifacts/13032657626/zip" > "${RUNNER_TEMP}/oct31.zip"
-      - name: Verify original PDF SHA and replay shadow provenance only
+      - name: Verify original PDF SHA, reproduce archived text, then replay history shadow
         run: |
           python - <<'PY'
           import json
@@ -57,6 +57,10 @@ jobs:
               )
               rows = report["history_rows"]
               assert report["source_bytes_sha256_verified"] is True
+              assert report["pdf_text_projection_reproduced_from_original_pdf"] is True
+              assert report["pdf_text_reextracted_sha256"] == report["pdf_text_sha256"]
+              assert report["pdf_extraction_page_count"] > 0
+              assert report["independent_original_page_visual_review"] is False
               assert report["history_source_rows_indexed"] == len(rows)
               assert report["history_source_rows_indexed"] > 0
               assert report["gold_fields_per_row"] == len(HISTORY_GOLD_FIELDS) == 13
