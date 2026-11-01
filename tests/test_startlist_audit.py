@@ -1,7 +1,7 @@
 """Unit tests for exact PDF/startlist horse and scratch reconciliation."""
 from collector.startlist_audit import (
     normalized_horse_name, reconcile_startlist, unresolved_placeholder_name,
-    stage_unverified_positive_scratch_signals,
+    stage_unverified_positive_scratch_signals, SCRATCH_STATUS_CONTRACT,
 )
 
 
@@ -215,6 +215,7 @@ def test_preliminary_positive_signal_never_confirms_scratch_or_active_state():
     assert race["qa"]["active_count"] is None
     assert race["qa"]["scratched_count"] is None
     assert race["qa"]["scratches_complete_as_of_snapshot"] is False
+    assert race["qa"]["scratch_status_contract"] == SCRATCH_STATUS_CONTRACT
 
 
 def test_missing_matching_startlist_cannot_promote_positive_signal():
