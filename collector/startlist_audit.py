@@ -130,11 +130,16 @@ def reconcile_startlist(pdf_races: list[dict[str, Any]], source: Any,
         })
     for doc in pdf_races:
         race_no = doc["race"]["race_number"]
-        # A race number invented from PDF section order is not an original
-        # physical-race identity, even if it coincidentally matches the API.
-        if doc["race"].get("race_number_source") == "pdf_order_inferred":
+        # A race number must be explicitly printed in the official PDF.
+        # Missing/unrecognized provenance is just as unsafe as an ordinal
+        # inferred from programme section order.
+        number_provenance = doc["race"].get("race_number_source")
+        if number_provenance not in ("pdf_heading", "pdf_heading_number"):
             audit["mismatches"].append({
-                "code": "PDF_PHYSICAL_RACE_NUMBER_INFERRED", "race": race_no})
+                "code": ("PDF_PHYSICAL_RACE_NUMBER_INFERRED"
+                         if number_provenance == "pdf_order_inferred"
+                         else "PDF_PHYSICAL_RACE_NUMBER_SOURCE_UNVERIFIED"),
+                "race": race_no})
             continue
         rows = result.get(str(race_no))
         if not isinstance(rows, list):
@@ -189,6 +194,24 @@ def reconcile_startlist(pdf_races: list[dict[str, Any]], source: Any,
                                             if normalized_horse_name(pdf_horses[n]["name"]) !=
                                                normalized_horse_name(api_horses[n]["horseName"])
                                         ]})
+            continue
+
+        # Number/name agreement is insufficient when a race contains
+        # two identically normalized names. A race cannot assign physical
+        # horse identity uniquely in that case without an original horse ID.
+        pdf_names = [normalized_horse_name(pdf_horses[n]["name"])
+                     for n in sorted(pdf_horses)]
+        api_names = [normalized_horse_name(api_horses[n]["horseName"])
+                     for n in sorted(api_horses)]
+        duplicates = sorted({name for name in pdf_names + api_names
+                             if name and (pdf_names.count(name) > 1
+                                          or api_names.count(name) > 1)})
+        if duplicates:
+            audit["mismatches"].append({
+                "code": "AMBIGUOUS_DUPLICATE_HORSE_IDENTITY",
+                "race": race_no, "normalized_names": duplicates,
+            })
+            doc["qa"]["identity_verification"] = "UNVERIFIED_DUPLICATE_HORSE_NAMES"
             continue
 
         # Two source files can agree on a *generic placeholder* rather than
