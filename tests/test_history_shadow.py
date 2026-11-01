@@ -1,9 +1,12 @@
 """C-DEV-04 strict shadow-only source history diagnostics, no 390-cell gold."""
 import hashlib
+import io
 import json
 import zipfile
 
 import pytest
+from pypdf import PdfReader
+from reportlab.pdfgen.canvas import Canvas
 
 from collector.history_shadow import (
     HISTORY_GOLD_FIELDS, SCHEMA, build_history_shadow,
@@ -12,8 +15,6 @@ from collector.history_shadow import (
 
 DAY = "2026-10-27"
 MEETING = "F2_NR_" + DAY
-PDF = b"%PDF-1.4\nfixture bytes used solely to prove checksum gate\n"
-PDF_SHA = hashlib.sha256(PDF).hexdigest()
 ARCHIVE_SHA = "a" * 64
 EXCERPT = """Løp 1
 2000m Autostart.
@@ -27,6 +28,29 @@ Tr: M. Schonlau
 SCHONLAU MARCGEL99.99.26-5|1 1 1 2000 16,9a
 Gelsenkirchen 27.10.2026 Utvidet - rikstoto.no Side: 1 av 1
 """
+
+
+def _make_original_pdf_fixture():
+    """Synthetic but genuine PDF with deterministic extractable UTF-8 text."""
+    stream = io.BytesIO()
+    writer = Canvas(stream, pageCompression=0)
+    writer.setTitle("CDEV04 synthetic original source integrity fixture")
+    flow = writer.beginText(40, 780)
+    flow.setFont("Helvetica", 8)
+    for line in EXCERPT.splitlines():
+        flow.textLine(line)
+    writer.drawText(flow)
+    writer.showPage()
+    writer.save()
+    content = stream.getvalue()
+    assert "\n\n".join(
+        page.extract_text() or "" for page in PdfReader(io.BytesIO(content)).pages
+    ) == EXCERPT
+    return content
+
+
+PDF = _make_original_pdf_fixture()
+PDF_SHA = hashlib.sha256(PDF).hexdigest()
 
 
 def _hash(value):
@@ -119,6 +143,11 @@ def test_original_pdf_sha_and_raw_text_in_zip_are_checked_before_parse(tmp_path)
     assert report["source_members"]["original_pdf"].endswith(
         f"/meetings/{MEETING}/full_program.pdf")
     assert report["source_scope"].startswith("IMMUTABLE_ARCHIVED_PDF_BYTES")
+    assert report["pdf_text_projection_reproduced_from_original_pdf"] is True
+    assert report["pdf_extraction_page_count"] == 1
+    assert report["pdf_text_reextracted_sha256"] == _hash(EXCERPT)
+    assert report["pdf_text_projection_extractor"].startswith("pypdf ")
+    assert report["independent_original_page_visual_review"] is False
     assert all(not row["source_text_projection_is_official_pdf_attested"]
                for row in report["history_rows"])
 
@@ -237,3 +266,36 @@ def test_missing_archived_manifest_cannot_attest_pdf(tmp_path):
             path, meeting_id=MEETING, date_oslo=DAY,
             expected_pdf_sha256=PDF_SHA,
         )
+
+
+def test_tampered_derived_text_with_original_pdf_unchanged_is_blocked(tmp_path):
+    # PDF SHA is still the pinned valid original; only TXT content was changed.
+    path = _archive(tmp_path, raw=EXCERPT.replace("REMCO VL", "REMCO XX"))
+    with pytest.raises(ValueError, match="ARCHIVED_PDF_TEXT_PROJECTION_MISMATCH"):
+        replay_original_archive(
+            path, meeting_id=MEETING, date_oslo=DAY, expected_pdf_sha256=PDF_SHA,
+        )
+
+
+def test_archived_txt_reordered_history_without_pdf_change_is_blocked(tmp_path):
+    # Substituting a valid-looking history line is not a source projection.
+    mutated = EXCERPT.replace("19.07.26-6|", "19.08.26-6|")
+    path = _archive(tmp_path, raw=mutated)
+    with pytest.raises(ValueError, match="ARCHIVED_PDF_TEXT_PROJECTION_MISMATCH"):
+        replay_original_archive(
+            path, meeting_id=MEETING, date_oslo=DAY, expected_pdf_sha256=PDF_SHA,
+        )
+
+
+def test_reproduction_does_not_upgrade_history_to_gold_or_pit(tmp_path):
+    report = replay_original_archive(
+        _archive(tmp_path), meeting_id=MEETING, date_oslo=DAY,
+        expected_pdf_sha256=PDF_SHA,
+    )
+    assert report["pdf_text_projection_reproduced_from_original_pdf"] is True
+    assert report["data004e_holdout_390_accepted"] == 0
+    assert report["independent_gold_field_pairs_accepted"] == 0
+    assert report["data004e_holdout_verified"] is False
+    assert report["source_publication_time_attested"] is False
+    assert report["pit_certified"] is False
+    assert report["bet_authorized"] is False
