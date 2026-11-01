@@ -26,7 +26,7 @@ def unresolved_placeholder_name(value: str) -> bool:
     merely for containing "horse" or a digit.
     """
     return bool(re.fullmatch(
-        r"(?:hast|horse|cavallo|cheval)(?:[1-9]|[12]\\d|30)",
+        r"(?:hast|horse|cavallo|cheval)(?:[1-9]|[12]\d|30)",
         normalized_horse_name(value),
     ))
 
