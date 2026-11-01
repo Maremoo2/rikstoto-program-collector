@@ -62,13 +62,13 @@ sound but one or more text projections mismatch, status must be
 `PARTIAL_OR_BLOCKED_PDF_TEXT_PROJECTION`, with **every source program
 counted in the denominator**.
 
-The CI step runs in `--diagnostic-only` mode to preserve
-an *honest negative report* when the projection is not fully
-reproduced. Green workflow execution is **not** a green parity
-or C4 gate; the explicit `status` and `projection_error_counts`
-are authoritative. CLI normally exits nonzero on blocked
-status unless explicitly run in diagnostic mode. No silent
-override of source discrepancies is permitted.
+The **CI step is now strict**: it requires the original source corpus
+and all **24/24 byte-identical PDF→TXT re-extractions**. A mismatch
+returns exit code 2 and fails the source check; a green workflow cannot
+silently conceal a partial projection cohort. The CLI has an optional
+`--diagnostic-only` switch for local write-once negative reports, but
+**CI intentionally does not use it**. A successful source-only status
+still does **not** mean C4, C1, C6 or HQ was approved.
 
 The existing original source cohort check reported **24/24 original
 PDF SHA, page-count and HTTP receipt correlations**, with source-typed
@@ -109,3 +109,36 @@ the relevant independent gates are actually met.
 
 No Betting/production files, original PDF, JSON, model,
 V3.3.12 score, gates, stakes or settlement are modified.
+
+
+## Exact original-source replay observed on PR #53
+
+On source-only development HEAD `e598cafe69c50c072c61b78bdfd6bc1836abb32e`,
+[workflow 41336387025](https://github.com/Maremoo2/rikstoto-program-collector/actions/runs/41336387025)
+verified:
+
+| Explicit immutable-source observation | Value |
+|---|---:|
+| Original Collector artifact ZIPs | 7 / 7 |
+| Original program PDF SHA/page/HTTP receipt | 24 / 24 |
+| Archived PDF text projections reproduced byte-for-byte | **24 / 24** |
+| Missing original PDF text projection | 0 |
+| Corrupt/mismatched original PDF text projection | 0 |
+| Observed parser candidate history source lines | **10,080** |
+| Historical legacy JSON raw HTTP bytes missing | **320 receipts** |
+| PDF programs source-typed physical / composite | 21 / 3 |
+| Independent 30 × 13 history gold cells accepted | **0 / 390** |
+| Independent 14-day NO/SE calendar coverage / T−4 PIT | **NOT VERIFIED** |
+
+Candidate history line count is a parser observation, **not**
+independent row-ownership accuracy, coverage or gold. The original PDF
+extractor is deterministic under the tested environment and method;
+pypdf byte-parity alone cannot resolve column/horse-header ambiguity
+in foreign or composite PDF layouts.
+
+Full Collector suite on original development HEAD:
+[run 41336387085](https://github.com/Maremoo2/rikstoto-program-collector/actions/runs/41336387085),
+**590 tests passed**; independent HQ workflow remained
+`BLOCKED_HQ_REVIEW_CONFIGURATION_MISSING`.
+The strict fail-closed CI amendment requires its own exact new-head
+retest before TESTED can be applied to that amendment.
