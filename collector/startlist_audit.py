@@ -18,6 +18,19 @@ def normalized_horse_name(value: str) -> str:
     return re.sub(r"[^a-z0-9]", "", ascii_name.casefold())
 
 
+def unresolved_placeholder_name(value: str) -> bool:
+    """Generic program-order tokens are not individual horse identities.
+
+    Seen in ORIGINAL Milano Nov 1 PDF and starts API (Häst 1 ... Häst 10).
+    Exact literal placeholder grammar only; never disqualify real horse names
+    merely for containing "horse" or a digit.
+    """
+    return bool(re.fullmatch(
+        r"(?:hast|horse|cavallo|cheval)(?:[1-9]|[12]\\d|30)",
+        normalized_horse_name(value),
+    ))
+
+
 def reconcile_startlist(pdf_races: list[dict[str, Any]], source: Any,
                         *, captured_at: str | None = None) -> dict[str, Any]:
     """Mutates verified race docs only if every number/name/flag matches.
@@ -104,6 +117,28 @@ def reconcile_startlist(pdf_races: list[dict[str, Any]], source: Any,
                                             if normalized_horse_name(pdf_horses[n]["name"]) !=
                                                normalized_horse_name(api_horses[n]["horseName"])
                                         ]})
+            continue
+
+        # Two source files can agree on a *generic placeholder* rather than
+        # on a real named horse. Exact start number + matching "Häst 1" never
+        # proves full-field identity (Milano original Nov 1, races 7 and 8).
+        # Do not attach verified scratch states to ANY runner in that race.
+        placeholders = [
+            {"number": n, "pdf_name": pdf_horses[n]["name"],
+             "startlist_name": api_horses[n]["horseName"]}
+            for n in sorted(api_horses)
+            if (unresolved_placeholder_name(pdf_horses[n]["name"])
+                or unresolved_placeholder_name(api_horses[n]["horseName"]))
+        ]
+        if placeholders:
+            audit["mismatches"].append({
+                "code": "UNRESOLVED_PLACEHOLDER_HORSE_IDENTITY",
+                "race": race_no, "placeholders": placeholders,
+            })
+            qa = doc["qa"]
+            qa["identity_verification"] = "UNVERIFIED_PLACEHOLDER_NAMES"
+            if "PLACEHOLDER_HORSE_IDENTITY_REVIEW" not in qa.setdefault("warnings", []):
+                qa["warnings"].append("PLACEHOLDER_HORSE_IDENTITY_REVIEW")
             continue
 
         # A full race with EVERY isScratched flag set is an anomaly, not
