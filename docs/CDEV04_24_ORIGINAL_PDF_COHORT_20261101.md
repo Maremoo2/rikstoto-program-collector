@@ -69,6 +69,41 @@ its Git blob SHA, then audits all original program PDFs. It does not
 use Betting's CSV double-reader scripts, modify Betting or publish
 raw PDF/page text or unverified private review labels.
 
+## Observed exact-head original archive replay, 1 November 2026
+
+Successful original-source replay:
+[GitHub Actions run 41328313194](https://github.com/Maremoo2/rikstoto-program-collector/actions/runs/41328313194)
+on development commit `0cb7664ede4a5a9cf33a3cf9730647d1bf0b9c80`.
+
+| Evidence (original immutable captures) | Observed |
+|---|---:|
+| Source archives opened and audited | 7 |
+| Source programs indexed | 24 |
+| PDF SHA-256 matches source index | 24 |
+| Original PDF page counts match source index | 24 |
+| Matching first-party PDF HTTP receipts | 24 |
+| **Typed physical-meeting PDF programs** | **21** |
+| **Typed composite-product PDF programs** | **3** |
+| Unknown meeting type in these source manifests | 0 |
+| Legacy JSON HTTP responses with missing original raw bytes | **320** |
+| Independently accepted horse/history gold cells | **0/390** |
+| Independently proven full NO/SE physical day/race denominator | **NO** |
+| Prospective original T−4 publication/PIT evidence | **NO** |
+
+The 21/3 breakdown comes from each original manifest's
+`is_multi_track_product` flag, **not** from a meeting prefix like
+`X1`, location inference or a Betting product name. The 24
+PDF programs are a *historical holdout source sample*, not a
+census of racing meetings or races. The 320 legacy JSON raw gaps
+are historical, not restored by successful PDF hashes.
+
+The exact-head tests also passed:
+[Collector 578 pytest](https://github.com/Maremoo2/rikstoto-program-collector/actions/runs/41328313206),
+Ruff 0.14.4 and 15 synthetic source/negative tests in the
+original archive replay workflow. All accepted gold/PIT/BET flags
+remain false. Independent HQ gate still fails, with
+`BLOCKED_HQ_REVIEW_CONFIGURATION_MISSING`.
+
 ## Data quality and C0–C7 acceptance boundary
 
 - **C0:** A green source audit is not HQ acceptance. As of this work,
