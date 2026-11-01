@@ -8,11 +8,11 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import re
 import zipfile
-from collections import Counter
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any
 
 from pypdf import PdfReader
@@ -173,7 +173,7 @@ def _one_pdf(archive: zipfile.ZipFile, meeting: str, pdf_sha: str,
             found_receipts[0].get("at_utc")
         )
     try:
-        reader = PdfReader(__import__("io").BytesIO(raw_pdf))
+        reader = PdfReader(io.BytesIO(raw_pdf))
         result["actual_pages"] = len(reader.pages)
         if len(reader.pages) != pages:
             result["errors"].append("ORIGINAL_PDF_PAGE_COUNT_MISMATCH")
