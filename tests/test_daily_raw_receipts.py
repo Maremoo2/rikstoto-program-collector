@@ -135,3 +135,77 @@ def test_pdf_readback_corruption_cannot_be_pdf_ok(tmp_path, monkeypatch):
     assert log[0]["status"] == "ARCHIVE_READBACK_FAILED"
     assert log[0]["source_type"] == "PDF"
     assert not any(x["status"] == "PDF_OK" for x in log)
+
+
+
+def test_request_layer_second_json_get_fails_as_source_collision(tmp_path, monkeypatch):
+    async def no_sleep(seconds):
+        pass
+
+    monkeypatch.setattr(daily.asyncio, "sleep", no_sleep)
+    path = tmp_path / "starts.json"
+    url = "https://www.rikstoto.no/api/racedays/TEST_NR_2026-10-31/starts"
+    first = b'{"success":true,"result":{"1":[]}}'
+    second = b'{"success":false,"result":{}}'
+    records = []
+    initial = asyncio.run(daily.request(
+        Context(Reply(first)), Robots(), url, path, records
+    ))
+    before = (path.read_bytes(), (tmp_path / "starts.raw.json").read_bytes())
+    changed = asyncio.run(daily.request(
+        Context(Reply(second)), Robots(), url, path, records
+    ))
+    assert initial is not None
+    assert changed is None
+    assert (path.read_bytes(), (tmp_path / "starts.raw.json").read_bytes()) == before
+    assert [x["status"] for x in records] == ["JSON_OK", "SOURCE_ARCHIVE_COLLISION"]
+    assert records[1]["source_type"] == "JSON"
+    assert not records[1].get("raw_readback_verified")
+
+
+def test_request_layer_second_pdf_get_preserves_first_original(tmp_path, monkeypatch):
+    async def no_sleep(seconds):
+        pass
+
+    monkeypatch.setattr(daily.asyncio, "sleep", no_sleep)
+    url = "https://www.rikstoto.no/api/programdownload/ProgramPdf/Utvidet/BJ_NR_2026-10-31"
+    path = tmp_path / "program.pdf"
+    records = []
+    original = b"%PDF-1.4\nORIGINAL_DOCUMENT\n"
+    revised = b"%PDF-1.4\nREVISED_DOCUMENT\n"
+    assert asyncio.run(daily.request(
+        Context(Reply(original)), Robots(), url, path, records, binary=True
+    )) == original
+    assert asyncio.run(daily.request(
+        Context(Reply(revised)), Robots(), url, path, records, binary=True
+    )) is None
+    assert path.read_bytes() == original
+    assert [x["status"] for x in records] == ["PDF_OK", "SOURCE_ARCHIVE_COLLISION"]
+    assert records[1]["source_type"] == "PDF"
+    assert "sha256" not in records[1]
+
+
+def test_corrupt_first_pdf_write_never_creates_valid_original_receipt(tmp_path, monkeypatch):
+    async def no_sleep(seconds):
+        pass
+
+    monkeypatch.setattr(daily.asyncio, "sleep", no_sleep)
+    original_read = Path.read_bytes
+
+    def tamper(path):
+        if path.name == "program.pdf":
+            return b"BAD_BYTES"
+        return original_read(path)
+
+    monkeypatch.setattr(Path, "read_bytes", tamper)
+    path = tmp_path / "program.pdf"
+    records = []
+    result = asyncio.run(daily.request(
+        Context(Reply(b"%PDF-1.4\nTEST\n")), Robots(),
+        "https://www.rikstoto.no/api/programdownload/ProgramPdf/Utvidet/BJ_NR_2026-10-31",
+        path, records, binary=True,
+    ))
+    assert result is None
+    assert records[0]["status"] == "ARCHIVE_READBACK_FAILED"
+    assert "PDF_READBACK_SHA_MISMATCH" in records[0]["error"]
+    assert not path.exists()
