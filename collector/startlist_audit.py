@@ -12,6 +12,9 @@ import unicodedata
 from typing import Any
 
 
+SCRATCH_STATUS_CONTRACT = "COLLECTOR_SCRATCH_AS_OF_V2"
+
+
 def normalized_horse_name(value: str) -> str:
     """Identity check independent of case and accents, not of spelling."""
     ascii_name = unicodedata.normalize("NFKD", value).encode("ascii", "ignore").decode()
@@ -61,6 +64,7 @@ def stage_unverified_positive_scratch_signals(
         horse.pop("scratch_source", None)
         horse.pop("scratch_captured_utc", None)
     qa = doc["qa"]
+    qa["scratch_status_contract"] = SCRATCH_STATUS_CONTRACT
     qa["active_count"] = None
     qa["scratched_count"] = None
     qa["scratches_complete_as_of_snapshot"] = False
