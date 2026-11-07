@@ -31,7 +31,7 @@ jobs:
           path: ${{ runner.temp }}/data005-original-source
       - name: Independently extract gold from SHA-verified PDF; replay changed existing parser
         run: |
-          python scripts/data005_original_pdf_gold_replay.py \
+          PYTHONPATH=. python scripts/data005_original_pdf_gold_replay.py \
             --source-root "${{ runner.temp }}/data005-original-source" \
             --output "${{ runner.temp }}/data005-verified-replay"
       - name: Publish gold replay matrix (not an official settlement)
