@@ -1,0 +1,44 @@
+name: DATA-005 Original PDF 120-line Gold Replay (NO BET)
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "collector/pdf_program.py"
+      - "tests/test_data005_nordic_pdf_gold.py"
+      - "scripts/data005_original_pdf_gold_replay.py"
+      - ".github/workflows/data005-original-pdf-gold-replay.yml"
+permissions:
+  contents: read
+  actions: read
+jobs:
+  source-replay:
+    if: github.event.pull_request.head.ref == 'research/data-005-pdf-history-validation-20261107'
+    runs-on: ubuntu-latest
+    timeout-minutes: 9
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-dev.txt PyMuPDF
+      - name: Download preserved official Saturday original (same repo)
+        uses: actions/download-artifact@v4
+        with:
+          run-id: 42346290934
+          name: rikstoto-morning-programs
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          repository: Maremoo2/rikstoto-program-collector
+          path: ${{ runner.temp }}/data005-original-source
+      - name: Independently extract gold from SHA-verified PDF; replay changed existing parser
+        run: |
+          PYTHONPATH=. python scripts/data005_original_pdf_gold_replay.py \
+            --source-root "${{ runner.temp }}/data005-original-source" \
+            --output "${{ runner.temp }}/data005-verified-replay"
+      - name: Publish gold replay matrix (not an official settlement)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: data005-original-pdf-120-gold-${{ github.run_id }}
+          path: ${{ runner.temp }}/data005-verified-replay/
+          if-no-files-found: warn
+          retention-days: 30

@@ -21,6 +21,61 @@ HORSE = re.compile(r"^\s*(\d{1,2})\s+([^,\n]{2,90}),\s+(.+)$")
 # Official program PDFs may join the track abbreviation to the date (GEL26.08.26-5).
 # A leading word boundary would silently discard these actual history rows.
 HISTORY = re.compile(r"(\d{2}\.\d{2}\.\d{2})-(\d{1,2})(?=\||\s)")
+
+# DATA-005: only the actual Nordic expanded-PDF text-layer layout.
+# Missing, off-layout or ambiguous cells stay None; never imply PIT proof.
+NORDIC_DRIVER_ABBREV = re.compile(r"^[A-Za-zÀ-žÆØÅæøåÄÖäö]{2,5}\s+[A-Za-zÀ-žÆØÅæøåÄÖäö]{2,5}$")
+NORDIC_TRACK_CODE = re.compile(r"^[A-Za-zÀ-žÆØÅæøåÄÖäö]{1,3}$")
+NORDIC_DISTANCE_TIME = re.compile(r"^([1-4]\d{3})\s+(\S+(?:\s+[a-z])?)$")
+NORDIC_KM_PACE = re.compile(r"^(\d{1,2},\d)\s*([ag]{0,2})$")
+NORDIC_PLACE = re.compile(r"^(?:[0-9]{1,2}|d|P|k|-)$")
+
+
+def _strict_nordic_history_cells(block: list[str], idx: int,
+                                 anchor: re.Match[str]) -> dict[str, Any]:
+    """Read strict PDF column lines, never compact FR/DE joined date rows."""
+    empty = {"track": None, "driver_abbrev": None, "distance_m": None,
+             "placing": None, "kilometre_time": None,
+             "gallop_marker": None, "disqualification_marker": None,
+             "cell_contract": "UNVERIFIED_PDF_LAYOUT"}
+    if idx + 2 >= len(block) or anchor.group(0) not in block[idx]:
+        return empty
+    row = block[idx].strip()
+    track = row[:anchor.start()].strip()
+    driver = None
+    if track and NORDIC_TRACK_CODE.fullmatch(track) and idx >= 1:
+        driver = block[idx - 1].strip()
+    elif not track and idx >= 2:
+        track = block[idx - 1].strip()
+        driver = block[idx - 2].strip()
+    if not (NORDIC_TRACK_CODE.fullmatch(track)
+            and isinstance(driver, str)
+            and NORDIC_DRIVER_ABBREV.fullmatch(driver)):
+        return empty
+    place = block[idx + 1].strip()
+    detail = block[idx + 2].strip()
+    if NORDIC_DISTANCE_TIME.fullmatch(place):
+        detail, place = place, None
+    elif not NORDIC_PLACE.fullmatch(place):
+        place = None
+    distance_match = NORDIC_DISTANCE_TIME.fullmatch(detail)
+    if distance_match is None:
+        return {**empty, "track": track, "driver_abbrev": driver,
+                "placing": place, "cell_contract": "NORDIC_PARTIAL_LAYOUT"}
+    distance = int(distance_match.group(1))
+    token = distance_match.group(2).strip()
+    pace_match = NORDIC_KM_PACE.fullmatch(token)
+    km_token = (pace_match.group(1) + pace_match.group(2)
+                if pace_match is not None else None)
+    is_gallop = (True if pace_match is not None and
+                 "g" in pace_match.group(2) else None)
+    is_disqualified = True if place == "d" or token.startswith("dg") else None
+    return {**empty, "track": track, "driver_abbrev": driver,
+            "placing": place, "distance_m": distance,
+            "kilometre_time": km_token, "gallop_marker": is_gallop,
+            "disqualification_marker": is_disqualified,
+            "cell_contract": "NORDIC_SOURCE_TEXT_PARTIAL_NOT_OFFICIAL_RESULT"}
+
 FOOTER = re.compile(r"\bUtvidet\s*-\s*rikstoto\.no\b", re.I)
 DISTANCE = re.compile(r"\b(\d{3,4})\s*m\s+(Voltestart|Autostart)\b", re.I)
 
@@ -95,7 +150,7 @@ def parse_extended_pdf(text: str, *, meeting_id: str, date: str,
             number, name, driver = details
             breeder = next((x for x in block if x.strip().startswith("Tr:")), None)
             starts = []
-            for line in block:
+            for row_idx, line in enumerate(block):
                 hist = HISTORY.search(line)
                 if not hist:
                     continue
@@ -104,10 +159,17 @@ def parse_extended_pdf(text: str, *, meeting_id: str, date: str,
                     d = datetime.strptime(previous_date, "%d.%m.%y").date().isoformat()
                 except ValueError:
                     d = None
+                cells = _strict_nordic_history_cells(block, row_idx, hist)
                 starts.append({"date": d, "race_number": int(previous_race),
-                               "post": None, "track": None, "driver_abbrev": None,
-                               "starter_number": None, "distance_m": None,
-                               "placing": None, "kilometre_time": None,
+                               "post": None, "track": cells["track"],
+                               "driver_abbrev": cells["driver_abbrev"],
+                               "starter_number": None,
+                               "distance_m": cells["distance_m"],
+                               "placing": cells["placing"],
+                               "kilometre_time": cells["kilometre_time"],
+                               "gallop_marker": cells["gallop_marker"],
+                               "disqualification_marker": cells["disqualification_marker"],
+                               "cell_contract": cells["cell_contract"],
                                "shoes": None, "wagon": None,
                                "odds_display": None, "prize_display": None,
                                "top_three": None, "raw_text": line, "comment": None})
