@@ -9,6 +9,8 @@ import re
 from datetime import datetime
 from typing import Any
 
+from .parsing import TOTAL_RE, YEAR_RE
+
 START = re.compile(r"START\s+KL\.?\s*(\d{1,2}:\d{2})", re.I)
 # Rikstoto may concatenate a heading to previous text (e.g. K150Løp 7).
 # The heading scan below is restricted to the lines before START KL.
@@ -102,6 +104,28 @@ def _horse_header(line: str) -> tuple[int, str, str] | None:
     return int(number), name.strip(), driver.strip()
 
 
+def _career_totals(block: list[str]) -> dict[str, int] | None:
+    # The extended PDF may place both year summaries and the final Tot:
+    # cell on one line. Restrict it to the horse header before prior starts.
+    values = []
+    for line in block[1:]:
+        if HISTORY.search(line):
+            break
+        cell = re.search(r"(?<!\S)Tot\s*:.*$", line, re.I)
+        if not cell or (line[:cell.start()].strip() and not YEAR_RE.match(line)):
+            continue
+        total = TOTAL_RE.fullmatch(cell.group())
+        if total is None:
+            return None
+        values.append(tuple(map(int, total.groups())))
+    if len(values) != 1:
+        return None
+    starts, wins, seconds, thirds = values[0]
+    if wins + seconds + thirds > starts:
+        return None
+    return dict(zip(("starts", "wins", "seconds", "thirds"), values[0], strict=True))
+
+
 def parse_extended_pdf(text: str, *, meeting_id: str, date: str,
                        url: str, captured_at: str, track: str | None = None) -> dict[str, Any]:
     """Match collector's export schema, keeping uncertain facts unverified.
@@ -176,7 +200,7 @@ def parse_extended_pdf(text: str, *, meeting_id: str, date: str,
             entrants.append({"program_number": number, "number_source": "official_pdf",
                              "name": name, "driver": driver, "scratched": None,
                              "scratch_state": "UNVERIFIED", "past_starts": starts,
-                             "year_stats": {}, "total_stats": None,
+                             "year_stats": {}, "total_stats": _career_totals(block),
                              "identity_text": next((x for x in block if "-års" in x), None),
                              "trainer_owner_breeder": breeder,
                              "header_text": block[0], "raw_section": "\n".join(block)})

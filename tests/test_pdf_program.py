@@ -312,3 +312,21 @@ def test_original_pdf_alone_never_declares_horse_active_or_scratched():
             assert horse["scratch_state"] == "UNVERIFIED"
         assert race["qa"]["active_count"] is None
         assert race["qa"]["scratched_count"] is None
+
+def test_pdf_career_totals_from_source_layout():
+    text = SAMPLE.replace(
+        "2026: 4-1-1-1 Tot: 4-1-1-1",
+        "2026: 4-0-0-0-32,7m 19,091 2025: 0-0-0-0- 0 Tot: 4-0-0-0",
+    )
+    horse = parsed(text)["races"][0]["entrants"][0]
+    assert horse["total_stats"] == {"starts": 4, "wins": 0, "seconds": 0, "thirds": 0}
+
+
+def test_pdf_career_totals_reject_impossible_duplicates_and_history_comments():
+    for line in (
+        "2026: 4-1-1-1 Tot: 4-3-2-0",
+        "2026: 4-1-1-1 Tot: 4-1-1-1\nTot: 7-2-2-1",
+        "2026: 4-1-1-1\nPe Egg OA 01.10.26-3|2 1 1 2300 30,0 Tot: 4-1-1-1",
+    ):
+        horse = parsed(SAMPLE.replace("2026: 4-1-1-1 Tot: 4-1-1-1", line))["races"][0]["entrants"][0]
+        assert horse["total_stats"] is None
