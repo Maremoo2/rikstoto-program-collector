@@ -183,7 +183,10 @@ jobs:
     name: Save privately accessible draft archive in GitHub Releases
     needs: [full-day]
     # Publish only scheduled or manually authorized archives.
-    if: ${{ always() && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.persist_archive == true)) }}
+    # Source Releases may only be published after successful capture.
+    # On failure, Actions diagnostic artifacts remain, but no fresh draft
+    # source Release is generated from incomplete/failed collection.
+    if: ${{ needs['full-day'].result == 'success' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.persist_archive == true)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
     permissions:
