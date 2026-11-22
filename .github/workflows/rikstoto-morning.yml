@@ -1,5 +1,6 @@
 name: Daily Rikstoto full programs – 07 Oslo
-# Only daily 07 Oslo and explicit manual runs collect official source data.
+# Daily 07 Oslo and explicit workflow_dispatch runs collect official source data.
+# Timeboxed Pre-Watch pilot dispatches carry explicit source_origin=prewatch_pilot.
 
 on:
   schedule:
@@ -20,6 +21,14 @@ on:
         required: false
         type: boolean
         default: true
+      source_origin:
+        description: "Source provenance: manual or timeboxed prewatch_pilot dispatcher"
+        required: false
+        type: choice
+        default: manual
+        options:
+          - manual
+          - prewatch_pilot
 
 permissions:
   contents: read
@@ -46,6 +55,7 @@ jobs:
       - name: Record GitHub trigger and scheduled Oslo execution time
         env:
           TRIGGER_EVENT: ${{ github.event_name }}
+          SOURCE_ORIGIN: ${{ inputs.source_origin || 'daily_schedule' }}
         run: |
           python - <<'PY'
           import os
@@ -59,6 +69,7 @@ jobs:
               out.write("## Triggerkontroll\n\n")
               out.write(f"- Event: `{trigger}`\n")
               out.write(f"- Faktisk registreringstid i Oslo: `{now.isoformat()}`\n")
+              out.write(f"- Source origin: {os.environ['SOURCE_ORIGIN']}\n")
               if trigger == "schedule":
                   out.write(f"- Avstand fra planlagt kl. 07:00: **{delay} minutter**\n")
                   out.write("- Dette verifiserer en faktisk tidsstyrt kjøring, ikke bare YAML-oppsettet.\n")
@@ -160,7 +171,7 @@ jobs:
             output/daily/
             daily-console.log
           if-no-files-found: warn
-          retention-days: 90
+          retention-days: ${{ inputs.source_origin == 'prewatch_pilot' && 7 || 90 }}
           compression-level: 6
       - name: Flag incomplete or unsuccessful collection
         if: steps.harvest.outcome == 'failure'
@@ -210,7 +221,7 @@ jobs:
             prewatch_feed/
             release-assets/
           if-no-files-found: error
-          retention-days: 90
+          retention-days: ${{ inputs.source_origin == 'prewatch_pilot' && 7 || 90 }}
           compression-level: 6
       - name: Publish date release (keep individual run ZIPs unchanged)
         env:
