@@ -180,3 +180,27 @@ def test_two_immutable_snapshots_can_be_diffed_without_merging():
     assert before["runners"][0]["effective_driver"] == "Martine Finsand"
     with pytest.raises(ValueError, match="full field|Full field"):
         compare_roster_snapshots(before, dict(after, runners=[]))
+
+
+def test_handoff_keeps_original_snapshot_bytes_unchanged(tmp_path):
+    root, folder, mid = _fixture(tmp_path)
+    original = {
+        p.relative_to(folder): hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in folder.rglob("*") if p.is_file()
+    }
+    result = build_handoff(root, tmp_path / "handoff")
+    assert result["race_count"] == 1
+    assert original == {
+        p.relative_to(folder): hashlib.sha256(p.read_bytes()).hexdigest()
+        for p in folder.rglob("*") if p.is_file()
+    }
+
+
+def test_no_newer_snapshot_does_not_claim_updated_roster(tmp_path):
+    _, _, _, index, _ = _build(tmp_path)
+    race = index["race_queue"][0]
+    assert race["official_roster_handoff_status"] == "VERIFIED_AS_OF_SOURCE_CAPTURE"
+    assert race["official_starts_source"]["source_publication_time_attested"] is False
+    assert index["snapshot_clock_source"] == "LATEST_OFFICIAL_ROSTER_RECEIPT"
+    # Date-time is the collector's GET observation, NOT a promise of live status.
+    assert race["official_starts_source"]["observed_utc"].startswith(DAY)
