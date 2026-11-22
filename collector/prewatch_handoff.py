@@ -141,6 +141,61 @@ def race_card(doc, *, source_status=None, official_roster=None):
     return "\n".join(lines) + "\n\n"
 
 
+def write_race_pack(dest, doc, roster, manifest, folder):
+    """Expose the existing parsed document losslessly, without a new parser.
+
+    The original archive remains authoritative. A machine-readable transport
+    must not turn raw/unverified history cells into approved model features.
+    """
+    mid = doc["race"]["meeting_id"]
+    number = doc["race"]["race_number"]
+    if (not isinstance(mid, str) or not mid or "/" in mid or "\\" in mid
+            or type(number) is not int or number < 1
+            or doc["race"].get("meeting_id") not in {
+                m.get("meeting_id") for m in manifest.get("meetings", [])
+                if isinstance(m, dict)
+            }):
+        raise ValueError("RACE_PACK_IDENTITY_INVALID")
+    gaps = ["PERMANENT_IDENTITY_NOT_ATTESTED", "CURRENT_WIN_NOT_INCLUDED",
+            "SOURCE_SNAPSHOT_NOT_LIVE_CERTIFICATION"]
+    if any(
+        past.get("cell_contract") == "UNVERIFIED_PDF_LAYOUT"
+        for horse in doc.get("entrants", []) for past in horse.get("past_starts", [])
+    ):
+        gaps.append("STRUCTURED_HISTORY_CELLS_UNVERIFIED")
+    if roster.get("status") != "VERIFIED_AS_OF_SOURCE_CAPTURE":
+        gaps.append(roster.get("first_blocker") or "OFFICIAL_ROSTER_UNVERIFIED")
+    pack = {
+        "schema": SCHEMA, "record_type": "FULL_RACE_SOURCE_PACK",
+        "race_id": f"RIKSTOTO:{mid}:{number}",
+        "date_oslo": manifest["date_oslo"], "source_run_id": manifest["run_id"],
+        "source_archive_tag": f"rikstoto-program-{manifest['date_oslo']}-{manifest['run_id']}",
+        "manifest_sha256": hashlib.sha256((folder / "manifest.json").read_bytes()).hexdigest(),
+        "structured_original_sha256": hashlib.sha256(
+            (folder / "structured_program_day.json").read_bytes()).hexdigest(),
+        "program": doc, "official_roster": roster,
+        "source_receipts": [
+            r for r in manifest.get("requests", [])
+            if isinstance(r, dict) and isinstance(r.get("url"), str)
+            and mid in r["url"]
+        ],
+        "missing_or_unverified": gaps,
+        "phase_a_completed": False, "bet_authority": False,
+    }
+    raw = (json.dumps(pack, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    name = f"race_pack_{mid}_{number}.json"
+    path = dest / name
+    try:
+        with path.open("xb") as stream:
+            stream.write(raw)
+    except FileExistsError:
+        if path.is_symlink() or path.read_bytes() != raw:
+            raise ValueError("RACE_PACK_READBACK_CONFLICT") from None
+    if path.read_bytes() != raw:
+        raise ValueError("RACE_PACK_READBACK_CONFLICT")
+    return name, hashlib.sha256(raw).hexdigest()
+
+
 def build_handoff(root: Path, dest: Path):
     manifests = sorted(root.glob("*/*/manifest.json"))
     if not manifests:
@@ -219,6 +274,7 @@ def build_handoff(root: Path, dest: Path):
             if review_warnings:
                 blockers.append("RACE_QA_WARNINGS_REVIEW")
             roster = official_rosters.get(mid, {}).get(race["race_number"], {})
+            pack_file, pack_sha = write_race_pack(dest, doc, roster, m, folder)
             index["race_queue"].append({
                 "race_key": f"{mid}|{race['race_number']}",
                 "meeting_id": mid, "race_number": race["race_number"],
@@ -226,6 +282,7 @@ def build_handoff(root: Path, dest: Path):
                 "start_local": race.get("scheduled_time_local"),
                 "runner_count": len(runners),
                 "history_rows": qa.get("past_start_rows", 0),
+                "race_pack_file": pack_file, "race_pack_sha256": pack_sha,
                 "official_roster_handoff_status": roster.get("status", "NOT_AVAILABLE"),
                 "official_roster_first_blocker": roster.get("first_blocker"),
                 "official_starts_source": roster.get("starts_source"),

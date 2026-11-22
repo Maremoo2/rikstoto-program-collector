@@ -104,6 +104,32 @@ def test_official_driver_change_and_scratch_replay(tmp_path):
     assert "05.10.26-3" in body
 
 
+def test_machine_race_pack_preserves_whole_original_field_and_source_hashes(tmp_path):
+    _, folder, _, index, dest = _build(tmp_path)
+    race = index["race_queue"][0]
+    payload = (dest / race["race_pack_file"]).read_bytes()
+    assert hashlib.sha256(payload).hexdigest() == race["race_pack_sha256"]
+    pack = json.loads(payload)
+    original_bytes = (folder / "structured_program_day.json").read_bytes()
+    original = json.loads(original_bytes)["races"][0]
+    assert pack["program"] == original
+    assert pack["structured_original_sha256"] == hashlib.sha256(original_bytes).hexdigest()
+    assert pack["manifest_sha256"] == hashlib.sha256((folder / "manifest.json").read_bytes()).hexdigest()
+    assert pack["race_id"] == "RIKSTOTO:OR_NR_2026-10-18:6"
+    assert pack["official_roster"]["runners"] == race["official_roster"]
+    assert pack["source_run_id"] == index["run_id"]
+    assert pack["phase_a_completed"] is False
+    assert pack["bet_authority"] is False
+    assert pack["missing_or_unverified"]
+    # Repeat packaging is stable, but a conflicting pack must not overwrite
+    # any previously frozen bytes.
+    build_handoff(folder.parent.parent, dest)
+    assert (dest / race["race_pack_file"]).read_bytes() == payload
+    (dest / race["race_pack_file"]).write_bytes(b"conflicting existing artifact")
+    with pytest.raises(ValueError, match="RACE_PACK_READBACK_CONFLICT"):
+        build_handoff(folder.parent.parent, dest)
+
+
 def test_missing_driver_change_source_does_not_imply_no_changes(tmp_path):
     _, _, _, index, dest = _build(tmp_path, with_changes=False)
     race = index["race_queue"][0]
