@@ -15,7 +15,13 @@ permissions:
 
 jobs:
   independent-hq-review-evidence:
-    if: github.event_name != 'issue_comment' || github.event.issue.pull_request != null
+    # Solo-maintainer repositories have no independent reviewer. Skip this
+    # informational evidence-only job when the external reviewer allowlist
+    # is empty; do NOT claim independent signoff or weaken the unit-test job.
+    # If an external reviewer is later configured, enforce exact-head evidence.
+    if: >-
+      vars.HQ_REVIEWER_LOGINS != '' &&
+      (github.event_name != 'issue_comment' || github.event.issue.pull_request != null)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
