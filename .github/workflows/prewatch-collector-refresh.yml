@@ -1,0 +1,82 @@
+name: P0 Pre-Watch Collector refresh pilot
+
+# Schedules the existing full-source Collector. No racing model changes.
+# Timeboxed from 2026-11-23 through 2026-12-08 (Europe/Oslo).
+# GitHub cron is best-effort; source observation timestamps, not trigger time, define freshness.
+on:
+  schedule:
+    - cron: '47 8-20 * * *'
+      timezone: Europe/Oslo
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Check pilot gate without dispatching Collector"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: p0-prewatch-collector-refresh-pilot
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - name: Gate by actual Oslo date and log provenance
+        id: gate
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'true' }}
+        run: |
+          python - <<'PY'
+          from datetime import date, datetime
+          from zoneinfo import ZoneInfo
+          import os
+
+          now = datetime.now(ZoneInfo("Europe/Oslo"))
+          first, last = date(2026, 11, 23), date(2026, 12, 8)
+          scheduled = os.environ["EVENT_NAME"] == "schedule"
+          manually_armed = os.environ.get("DRY_RUN", "true").lower() == "false"
+          active = first <= now.date() <= last
+          dispatch = active and (scheduled or manually_armed)
+          expired = scheduled and now.date() > last
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as f:
+              f.write(f"dispatch={'true' if dispatch else 'false'}\n")
+              f.write(f"expired={'true' if expired else 'false'}\n")
+              f.write(f"date_oslo={now.date().isoformat()}\n")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as f:
+              f.write("# P0 Pre-Watch Collector refresh gate\n")
+              f.write(f"- Actual Oslo time: {now.isoformat()}\n")
+              f.write(f"- Trigger: {os.environ['EVENT_NAME']}\n")
+              f.write(f"- Pilot window: {first} through {last}\n")
+              f.write(f"- Manual dry run: {not manually_armed}\n")
+              f.write(f"- Collector dispatch: {dispatch}\n")
+              f.write("- Pre-Watch evaluates freshness from official starts/driverChanges observations, never from this trigger clock.\n")
+          PY
+      - name: Dispatch existing Collector on main with provenance
+        if: steps.gate.outputs.dispatch == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          LOCAL_DATE: ${{ steps.gate.outputs.date_oslo }}
+        run: |
+          set -euo pipefail
+          gh workflow run rikstoto-morning.yml \
+            --repo "$GITHUB_REPOSITORY" --ref main \
+            --field "date=$LOCAL_DATE" \
+            --field "source_origin=prewatch_pilot" \
+            --field "persist_archive=true"
+          echo "Collector dispatch ACK for $LOCAL_DATE; NOT proof of completed source capture." >> "$GITHUB_STEP_SUMMARY"
+      - name: Self-disable expired timeboxed pilot
+        if: steps.gate.outputs.expired == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow disable prewatch-collector-refresh.yml --repo "$GITHUB_REPOSITORY"
+          echo "Pilot expired; workflow disabled. Daily 07:00 Collector remains unchanged." >> "$GITHUB_STEP_SUMMARY"
