@@ -1,10 +1,22 @@
 name: Pre-Watch read-only Ledger authentication diagnostic
 on:
   workflow_dispatch:
+    inputs:
+      mode:
+        description: "Default auth-only; full integration requires a verified Collector run ID"
+        type: choice
+        default: auth_only
+        options:
+          - auth_only
+          - full_integration
+      collector_run_id:
+        description: "Completed main Collector workflow run ID (full integration only)"
+        type: string
+        required: false
 permissions: {}
 jobs:
   ledger:
-    if: github.repository_id == '1424144324' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
+    if: github.repository_id == '1424144324' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.mode == 'auth_only'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -121,4 +133,108 @@ jobs:
           # This proves transport/auth/schema only, never Phase A completion.
           print("LEDGER_READ_CONFIRMED")
           print("AUTH_TEST_PASS: two Ledger ranges; read-only scope; schema verified")
+          PY
+
+  integration:
+    if: github.repository_id == '1424144324' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.mode == 'full_integration'
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      CANDIDATE_SHA: 89ed8747ff9582c7c8b6d9b355941db0a3976ef3
+      COLLECTOR_RUN_ID: ${{ inputs.collector_run_id }}
+    steps:
+      - name: Verify immutable candidate and approved source run
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$COLLECTOR_RUN_ID" =~ ^[0-9]{1,20}$ ]] || { echo INVALID_COLLECTOR_RUN_ID; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$COLLECTOR_RUN_ID" > "$RUNNER_TEMP/source-run.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          d=json.loads((Path(os.environ["RUNNER_TEMP"])/"source-run.json").read_text())
+          if not (d["id"] == int(os.environ["COLLECTOR_RUN_ID"]) and
+                  d["repository"]["id"] == 1424144324 and d["workflow_id"] == 388333234 and
+                  d["head_branch"] == "main" and d["event"] in {"schedule","workflow_dispatch"} and
+                  d["status"] == "completed" and d["conclusion"] == "success"):
+              raise SystemExit("SOURCE_RUN_NOT_APPROVED")
+          print("SOURCE_RUN_IDENTITY_PASS")
+          PY
+          mkdir -p "$RUNNER_TEMP/pinned-code/collector" "$RUNNER_TEMP/source-input"
+          touch "$RUNNER_TEMP/pinned-code/collector/__init__.py"
+          for name in prewatch_ready prewatch_ledger_reader prewatch_ready_integration; do
+            gh api "repos/$GITHUB_REPOSITORY/contents/collector/$name.py?ref=$CANDIDATE_SHA" --jq '.content' | base64 -d > "$RUNNER_TEMP/pinned-code/collector/$name.py"
+            test -s "$RUNNER_TEMP/pinned-code/collector/$name.py"
+          done
+          gh run download "$COLLECTOR_RUN_ID" --repo "$GITHUB_REPOSITORY" --name prewatch-bridge-fallback --dir "$RUNNER_TEMP/source-input"
+          echo "PINNED_SOURCE_INPUT_READY"
+      - name: Require configured read-only identity
+        env:
+          PROVIDER: ${{ vars.PREWATCH_WIF_PROVIDER }}
+          SERVICE_ACCOUNT: ${{ vars.PREWATCH_LEDGER_READER_SA }}
+          LEDGER_ID: ${{ secrets.PREWATCH_LEDGER_SPREADSHEET_ID }}
+        run: |
+          set -euo pipefail
+          [[ -n "$PROVIDER" && -n "$SERVICE_ACCOUNT" && "$LEDGER_ID" =~ ^[A-Za-z0-9_-]{20,120}$ ]] || { echo LEDGER_AUTH_CONFIGURATION_MISSING_OR_INVALID; exit 1; }
+      - name: Obtain short-lived Sheets read-only token
+        id: integration_auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2.1.13
+        with:
+          workload_identity_provider: ${{ vars.PREWATCH_WIF_PROVIDER }}
+          service_account: ${{ vars.PREWATCH_LEDGER_READER_SA }}
+          token_format: access_token
+          access_token_lifetime: 300s
+          access_token_scopes: https://www.googleapis.com/auth/spreadsheets.readonly
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Full Ledger and source integration (no publication)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREWATCH_LEDGER_SPREADSHEET_ID: ${{ secrets.PREWATCH_LEDGER_SPREADSHEET_ID }}
+          PREWATCH_LEDGER_ACCESS_TOKEN: ${{ steps.integration_auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/pinned-code"
+          python3 - <<'PY'
+          import json, os, re, sys
+          from datetime import datetime
+          from pathlib import Path
+          from zoneinfo import ZoneInfo
+          from collector.prewatch_ledger_reader import read_live
+          from collector.prewatch_ready_integration import main
+          try:
+              if not os.environ.get("PREWATCH_LEDGER_ACCESS_TOKEN"):
+                  raise ValueError("LEDGER_ACCESS_TOKEN_MISSING")
+              day = datetime.now(ZoneInfo("Europe/Oslo")).date().isoformat()
+              result = read_live(day)
+              if result["evidence_kind"] != "GOOGLE_API_READ":
+                  raise ValueError("LEDGER_EVIDENCE_INVALID")
+              print(json.dumps({"status":"FULL_LEDGER_READ_PASS","assessment_rows":result["assessment_rows"],
+                                "field_rows":result["field_rows"],"completed_today":len(result["completed_ids"])}))
+              root = Path(os.environ["RUNNER_TEMP"]) / "source-input"
+              feed = root / "prewatch_feed"
+              assets = root / "release-assets"
+              archives = list(assets.glob("rikstoto-*.zip"))
+              if len(archives) != 1 or not (feed / "index.json").is_file() or not (assets / "release_notes.md").is_file():
+                  raise ValueError("SOURCE_ARTIFACT_LAYOUT_INVALID")
+              out = Path(os.environ["RUNNER_TEMP"]) / "integration-diagnostic.json"
+              sys.argv = ["prewatch_ready_integration", "--feed", str(feed), "--archive", str(archives[0]),
+                          "--notes", str(assets / "release_notes.md"), "--output", str(out), "--read-ledger"]
+              main()
+              packet = json.loads(out.read_text())
+              if packet["diagnostic_status"] != "LIVE_LEDGER_SOURCE_DIAGNOSTIC" or packet["replay_only"] or packet["operational_publication_allowed"] or packet["bet_authority"] or packet["phase_a_completed"]:
+                  raise ValueError("DIAGNOSTIC_BOUNDARY_INVALID")
+              print("FULL_INTEGRATION_DIAGNOSTIC_PASS")
+              if packet["status"] == "NO_ELIGIBLE_RACE":
+                  print("NO_ELIGIBLE_RACE_IS_NOT_LIVE_READY_PROOF")
+              out.unlink()
+          except Exception as exc:
+              code = str(exc)
+              print(code if re.fullmatch(r"[A-Z][A-Z0-9_]{2,79}", code) else "INTEGRATION_DIAGNOSTIC_FAILED")
+              sys.exit(1)
           PY
