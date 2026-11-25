@@ -8,7 +8,7 @@ import pytest
 from collector.prewatch_ready import digest, encoded, stamp
 from collector.prewatch_ready_integration import prepare
 from collector.prewatch_ready_mailbox import prepare_update
-from test_prewatch_ready import fixture, write_pack, write_index, DAY, RUN, MID, ARCH, TAG, NOW
+from tests.test_prewatch_ready import fixture, write_pack, write_index, DAY, RUN, MID, ARCH, TAG, NOW
 
 
 def source_fixture(tmp_path):
