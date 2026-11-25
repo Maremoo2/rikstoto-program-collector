@@ -1,34 +1,124 @@
 name: Pre-Watch read-only Ledger authentication diagnostic
 on:
   workflow_dispatch:
-permissions:
-  contents: read
+permissions: {}
 jobs:
   ledger:
-    if: github.ref == 'refs/heads/main'
+    if: github.repository_id == '1424144324' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
-      contents: read
       id-token: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
       - name: Require configured read-only identity
         env:
           PROVIDER: ${{ vars.PREWATCH_WIF_PROVIDER }}
           SERVICE_ACCOUNT: ${{ vars.PREWATCH_LEDGER_READER_SA }}
+          LEDGER_ID: ${{ secrets.PREWATCH_LEDGER_SPREADSHEET_ID }}
         run: |
-          test -n "$PROVIDER" && test -n "$SERVICE_ACCOUNT" || { echo LEDGER_AUTH_CONFIGURATION_MISSING; exit 1; }
-      - uses: google-github-actions/auth@v2
+          set -euo pipefail
+          if [[ -z "$PROVIDER" || -z "$SERVICE_ACCOUNT" || ! "$LEDGER_ID" =~ ^[A-Za-z0-9_-]{20,120}$ ]]; then
+            echo LEDGER_AUTH_CONFIGURATION_MISSING_OR_INVALID
+            exit 1
+          fi
+      - name: Obtain short-lived Sheets read-only token
+        id: auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2.1.13
         with:
           workload_identity_provider: ${{ vars.PREWATCH_WIF_PROVIDER }}
           service_account: ${{ vars.PREWATCH_LEDGER_READER_SA }}
-          create_credentials_file: true
-      - run: python -m pip install 'google-auth[requests]>=2,<3'
-      - name: Read Ledger (aggregate diagnostics only)
+          token_format: access_token
+          access_token_lifetime: 300s
+          access_token_scopes: https://www.googleapis.com/auth/spreadsheets.readonly
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Verify actual Ledger read and schema (no data in logs)
         env:
-          PREWATCH_LEDGER_SPREADSHEET_ID: ${{ secrets.PREWATCH_LEDGER_SPREADSHEET_ID }}
-        run: python -m collector.prewatch_ledger_reader
+          LEDGER_ID: ${{ secrets.PREWATCH_LEDGER_SPREADSHEET_ID }}
+          ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import os
+          import re
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          # Match the canonical column contract proposed in integration PR #63.
+          # Read only headers plus at most one data row in each tab.
+          expected = {
+              "RaceAssessments!A1:AG2": (
+                  "assessment_id race_id assessed_at_iso assessment_epoch_utc scheduled_start_epoch_utc "
+                  "non_scratched_horses horses_really_assessed fullfield_scratches_QA race_shape_documented "
+                  "data_score_25 shape_score_20 mispricing_score_30 liquidity_score_15 fit_score_10 total_score_formula "
+                  "score_bounds_QA_formula A_WATCH_GATE_formula FULL_RACE_QA_formula candidate_horse_no candidate_horse_name "
+                  "mispricing_hypothesis counterargument race_shape_summary source_url source_observed_at_iso "
+                  "assessment_status notes freeze_ref pilot_id STATUS_QA_consistent_formula assessment_ISO_epoch_QA "
+                  "field_snapshot_id strict_roster_qa_formula"
+              ).split(),
+              "RaceFieldSnapshots!A1:U2": (
+                  "field_snapshot_id race_id horse_no horse_name post distance_m scratch_state driver trainer "
+                  "source_uri observed_at_iso observed_epoch_utc scheduled_start_epoch_utc equipment_asof field_version "
+                  "source_kind member_key_formula unique_member_QA_formula official_prestart_QA_formula notes "
+                  "observed_ISO_epoch_QA"
+              ).split(),
+          }
+
+          def fail(code):
+              print(code)
+              raise SystemExit(1)
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          ledger = os.environ.get("LEDGER_ID", "")
+          token = os.environ.get("ACCESS_TOKEN", "")
+          if not re.fullmatch(r"[A-Za-z0-9_-]{20,120}", ledger) or not token:
+              fail("LEDGER_AUTH_CONFIGURATION_MISSING_OR_INVALID")
+          params = [("ranges", r) for r in expected] + [
+              ("majorDimension", "ROWS"),
+              ("valueRenderOption", "UNFORMATTED_VALUE"),
+          ]
+          url = (
+              "https://sheets.googleapis.com/v4/spreadsheets/"
+              + ledger + "/values:batchGet?" + urllib.parse.urlencode(params)
+          )
+          request = urllib.request.Request(
+              url, headers={"Authorization": "Bearer " + token}, method="GET"
+          )
+          try:
+              opener = urllib.request.build_opener(NoRedirect())
+              with opener.open(request, timeout=25) as response:
+                  if response.status != 200:
+                      fail("LEDGER_HTTP_NOT_200")
+                  raw = response.read(1_048_577)
+              if len(raw) > 1_048_576:
+                  fail("LEDGER_RESPONSE_TOO_LARGE")
+              body = json.loads(raw)
+          except urllib.error.HTTPError as exc:
+              fail("LEDGER_HTTP_" + str(exc.code))
+          except (ValueError, OSError, UnicodeError):
+              fail("LEDGER_READ_OR_RESPONSE_INVALID")
+
+          if not isinstance(body, dict) or body.get("spreadsheetId") != ledger:
+              fail("LEDGER_ID_MISMATCH")
+          ranges = body.get("valueRanges")
+          if not isinstance(ranges, list) or len(ranges) != len(expected):
+              fail("LEDGER_RANGES_MISSING")
+          for item, (requested, headers) in zip(ranges, expected.items()):
+              if not isinstance(item, dict) or item.get("range") != requested or item.get("majorDimension") != "ROWS":
+                  fail("LEDGER_RANGE_MISMATCH")
+              values = item.get("values")
+              if not isinstance(values, list) or not values or values[0] != headers:
+                  fail("LEDGER_SCHEMA_MISMATCH")
+              if len(values) > 2 or any(not isinstance(row, list) or len(row) > len(headers) for row in values):
+                  fail("LEDGER_RESPONSE_SHAPE_INVALID")
+
+          # No cell values, identifiers, token, response body, or artifacts.
+          # This proves transport/auth/schema only, never Phase A completion.
+          print("LEDGER_READ_CONFIRMED")
+          print("AUTH_TEST_PASS: two Ledger ranges; read-only scope; schema verified")
+          PY
