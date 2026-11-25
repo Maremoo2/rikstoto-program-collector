@@ -116,3 +116,28 @@ def test_stale_roster_not_excluded():
     a, f = data()
     a[1][ASSESS.index("source_observed_at_iso")] = "2026-11-25T08:00:00Z"
     assert validate_values(a, f, DAY, NOW)["completed_ids"] == []
+
+
+def test_orphan_input_not_silently_discarded():
+    a, f = data()
+    a.append(row(ASSESS, {"FULL_RACE_QA_formula": "NO"}))
+    assert validate_values(a, f, DAY, NOW)["completed_ids"] == [RACE]
+    a.append(row(ASSESS, {"assessment_status": "BELOW_THRESHOLD"}))
+    with pytest.raises(ValueError, match="LEDGER_ORPHAN_ROW"):
+        validate_values(a, f, DAY, NOW)
+    a, f = data()
+    f.append(row(FIELD, {"horse_name": "Unidentified member"}))
+    with pytest.raises(ValueError, match="LEDGER_ORPHAN_ROW"):
+        validate_values(a, f, DAY, NOW)
+
+
+def test_malformed_response_has_safe_error(monkeypatch):
+    monkeypatch.setenv(SPREADSHEET_ID_ENV, SPREADSHEET_ID)
+    class BadResponse(Response):
+        def json(self):
+            raise ValueError("sensitive response detail")
+    class BadSession(Session):
+        def get(self, *args, **kwargs):
+            return BadResponse()
+    with pytest.raises(ValueError, match="^LEDGER_RESPONSE_INVALID$"):
+        read_live(DAY, session=BadSession(), clock_now=lambda: NOW)

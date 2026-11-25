@@ -117,23 +117,59 @@ def verify_sources(feed, archive, notes, records, now):
     return release_ids
 
 
+def utcnow():
+    return datetime.now(timezone.utc)
+
+
+def refresh_reference(previous):
+    now = utcnow()
+    require(now >= previous and now.astimezone(OSLO).date() == previous.astimezone(OSLO).date(),
+            "DIAGNOSTIC_CLOCK_INVALID")
+    return now
+
+
+def check_live_packet(packet, now):
+    """Reject a diagnostic that expired while verification or serialization ran."""
+    if packet["replay_only"]:
+        return
+    reference = stamp(packet["reference_utc"])
+    require(now >= reference and now.astimezone(OSLO).date().isoformat() == packet["date_oslo"],
+            "DIAGNOSTIC_CLOCK_INVALID")
+    if "ledger_evidence" in packet:
+        finish = stamp(packet["ledger_evidence"]["read_finished_utc"])
+        require(0 <= (now - finish).total_seconds() <= 120, "LEDGER_STALE")
+    if packet["selected"] is not None:
+        meta = packet["selected"]["metadata"]
+        remaining = (min(stamp(meta["latest_freeze_utc"]), stamp(meta["scheduled_start_iso"])) - now).total_seconds()
+        require(remaining >= packet["min_analysis_window_seconds"], "DIAGNOSTIC_PACKET_EXPIRED")
+
+
 def prepare(feed, archive, notes, records, now, *, replay=False, read_ledger=False):
-    ids = verify_sources(feed, archive, notes, records, now)
     require(not (replay and read_ledger), "LIVE_LEDGER_REPLAY_FORBIDDEN")
+    ids = verify_sources(feed, archive, notes, records, now)
+    # Source verification and network I/O consume time. Never score eligibility at
+    # an earlier clock just because the archive was fresh when verification started.
+    if not replay:
+        now = refresh_reference(now)
     ledger = None
     if read_ledger:
-        from .prewatch_ledger_reader import read_live
+        from .prewatch_ledger_reader import read_live, SCOPE
         ledger = read_live(now.astimezone(OSLO).date().isoformat())
-        require(ledger["evidence_kind"] == "GOOGLE_API_READ", "LEDGER_EVIDENCE_INVALID")
-        now = datetime.now(timezone.utc)
+        require(ledger["evidence_kind"] == "GOOGLE_API_READ" and ledger["scope"] == SCOPE,
+                "LEDGER_EVIDENCE_INVALID")
+        now = refresh_reference(now)
         require(0 <= (now - stamp(ledger["read_finished_utc"])).total_seconds() <= 120, "LEDGER_STALE")
     packet = build_ready([feed], ids, now, replay=replay,
                          completed=None if ledger is None else set(ledger["completed_ids"]))
     if ledger is not None:
         packet["ledger_evidence"] = {k: v for k, v in ledger.items() if k != "completed_ids"}
     packet["transport_evidence"] = "NUMERIC_RELEASE_BODY_AND_ORIGINAL_ARCHIVE_SHA_VERIFIED"
+    packet["diagnostic_status"] = ("REPLAY_ONLY" if replay else
+                                   "LIVE_LEDGER_SOURCE_DIAGNOSTIC" if read_ledger else "SOURCE_ONLY_DIAGNOSTIC")
     packet["operational_publication_allowed"] = False  # remains disabled until verified endpoint and approved activation
     require(len(encoded(packet)) <= 95_000, "READY_PACKET_TOO_LARGE")
+    if not replay:
+        check_live_packet(packet, refresh_reference(now))
     return packet
 
 
@@ -153,10 +189,20 @@ def main():
     now = stamp(a.replay_at) if a.replay_at else datetime.now(timezone.utc)
     packet = prepare(a.feed, a.archive, a.notes, records, now, replay=bool(a.replay_at), read_ledger=a.read_ledger)
     raw = encoded(packet)
-    with a.output.open("xb") as f:
-        f.write(raw)
-    require(a.output.read_bytes() == raw, "PACKET_READBACK_MISMATCH")
+    created = False
+    try:
+        with a.output.open("xb") as f:
+            created = True
+            f.write(raw)
+        require(a.output.read_bytes() == raw, "PACKET_READBACK_MISMATCH")
+        if not packet["replay_only"]:
+            check_live_packet(packet, utcnow())
+    except Exception:
+        if created:
+            a.output.unlink()
+        raise
     print(json.dumps({"status": packet["status"], "sha256": digest(raw), "eligible": len(packet["queue"]),
+                      "diagnostic_status": packet["diagnostic_status"], "ledger_exclusion": packet["ledger_exclusion"],
                       "replay_only": packet["replay_only"], "publication_allowed": False}))
 
 

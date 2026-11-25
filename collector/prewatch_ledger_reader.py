@@ -50,8 +50,13 @@ def table(values, header, *, field=False):
         require(isinstance(row, list) and len(row) <= len(header), "LEDGER_ROW_INVALID")
         row = row + [""] * (len(header) - len(row))
         if not row[0] and not row[1] and (not field or not row[2]):
-            continue  # formula spill has no identity
-        require(bool(row[0]) and bool(row[1]) and (not field or bool(row[2])), "LEDGER_ROW_ID_MISSING")
+            # Ignore only blank rows or explicitly known derived formula spill.
+            derived = {k for k in header if k.endswith("_formula") or k.endswith("_QA")}
+            require(not any(v != "" and v is not None for k, v in zip(header, row)
+                            if k not in derived), "LEDGER_ORPHAN_ROW")
+            continue
+        require(isinstance(row[0], str) and bool(row[0].strip()) and bool(row[1])
+                and (not field or bool(row[2])), "LEDGER_ROW_ID_MISSING")
         d = dict(zip(header, row))
         d["race_id"] = race_key(d["race_id"])
         result.append(d)
@@ -141,12 +146,15 @@ def read_live(day, *, session=None, clock_now=None):
         ("majorDimension", "ROWS")]
     try:
         response = session.get(URL.format(configured), params=params, timeout=30)
-        require(response.status_code == 200, f"LEDGER_HTTP_{response.status_code}")
-        body = response.json()
-    except ValueError:
-        raise
     except Exception:
         raise ValueError("LEDGER_READ_UNAVAILABLE") from None
+    status = response.status_code
+    require(type(status) is int and 100 <= status <= 599, "LEDGER_HTTP_STATUS_INVALID")
+    require(status == 200, f"LEDGER_HTTP_{status}")
+    try:
+        body = response.json()
+    except Exception:
+        raise ValueError("LEDGER_RESPONSE_INVALID") from None
     finished = now()
     require(timedelta(0) <= finished - started <= timedelta(seconds=120)
             and finished.astimezone(OSLO).date().isoformat() == day, "LEDGER_READ_CLOCK_INVALID")
@@ -155,7 +163,8 @@ def read_live(day, *, session=None, clock_now=None):
     require(isinstance(v, list) and len(v) == 2, "LEDGER_RANGES_MISSING")
     for item, requested in zip(v, RANGES):
         tab, cols = requested.split("!")
-        require(re.fullmatch(re.escape(tab) + r"!A1:" + cols.split(":")[1] + r"\d*", item.get("range", ""))
+        require(isinstance(item, dict) and isinstance(item.get("range"), str)
+                and re.fullmatch(re.escape(tab) + r"!A1:" + cols.split(":")[1] + r"\d*", item["range"])
                 and item.get("majorDimension") == "ROWS", "LEDGER_RANGE_MISMATCH")
     result = validate_values(v[0].get("values"), v[1].get("values"), day, finished)
     result.update(read_started_utc=started.isoformat(), read_finished_utc=finished.isoformat(),

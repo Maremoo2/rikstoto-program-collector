@@ -51,7 +51,8 @@ def source_fixture(tmp_path):
     return feed, archive, notes, records
 
 
-def test_source_integration_and_expiry(tmp_path):
+def test_source_integration_and_expiry(tmp_path, monkeypatch):
+    monkeypatch.setattr("collector.prewatch_ready_integration.utcnow", lambda: NOW)
     args = source_fixture(tmp_path)
     p = prepare(*args, NOW, replay=True)
     assert p["status"] == "SOURCE_READY" and len(p["queue"]) == 1
@@ -85,3 +86,46 @@ def test_bad_source_evidence(tmp_path, case, code):
         (feed / q["race_pack_file"]).write_text("{}")
     with pytest.raises(ValueError, match=code):
         prepare(feed, archive, notes, records, NOW, replay=True)
+
+
+def test_full_path_synthetic_ledger_exclusion(tmp_path, monkeypatch):
+    # Mocked contract test, not evidence of a Google-authenticated live run.
+    from collector.prewatch_ledger_reader import SCOPE
+    monkeypatch.setattr("collector.prewatch_ready_integration.utcnow", lambda: NOW)
+    args = source_fixture(tmp_path)
+    result = {"evidence_kind": "GOOGLE_API_READ", "scope": SCOPE,
+              "read_finished_utc": NOW.isoformat(), "completed_ids": [f"{DAY}|Solvalla|1"]}
+    monkeypatch.setattr("collector.prewatch_ledger_reader.read_live", lambda day: result)
+    packet = prepare(*args, NOW, read_ledger=True)
+    assert packet["diagnostic_status"] == "LIVE_LEDGER_SOURCE_DIAGNOSTIC"
+    assert packet["status"] == "NO_ELIGIBLE_RACE"
+    assert packet["blocked"][0]["code"] == "ALREADY_COMPLETED"
+    assert "completed_ids" not in packet["ledger_evidence"]
+    assert packet["operational_publication_allowed"] is False
+    assert packet["phase_a_completed"] is False and packet["bet_authority"] is False
+
+
+def test_live_path_no_fallback_on_ledger_failure(tmp_path, monkeypatch):
+    monkeypatch.setattr("collector.prewatch_ready_integration.utcnow", lambda: NOW)
+    args = source_fixture(tmp_path)
+    def denied(day):
+        raise ValueError("LEDGER_HTTP_403")
+    monkeypatch.setattr("collector.prewatch_ledger_reader.read_live", denied)
+    with pytest.raises(ValueError, match="LEDGER_HTTP_403"):
+        prepare(*args, NOW, read_ledger=True)
+
+
+def test_live_source_expiry_after_verification(tmp_path, monkeypatch):
+    args = source_fixture(tmp_path)
+    monkeypatch.setattr("collector.prewatch_ready_integration.utcnow", lambda: stamp("2026-11-25T08:30:00Z"))
+    packet = prepare(*args, NOW)
+    assert packet["status"] == "NO_ELIGIBLE_RACE"
+    assert packet["blocked"][0]["code"] == "ROSTER_STALE"
+
+
+def test_live_source_expiry_during_packet_build(tmp_path, monkeypatch):
+    args = source_fixture(tmp_path)
+    clocks = iter([NOW, stamp("2026-11-25T08:30:00Z")])
+    monkeypatch.setattr("collector.prewatch_ready_integration.utcnow", lambda: next(clocks))
+    with pytest.raises(ValueError, match="DIAGNOSTIC_PACKET_EXPIRED"):
+        prepare(*args, NOW)
