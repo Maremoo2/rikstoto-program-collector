@@ -3,7 +3,11 @@ import json
 import pytest
 
 from collector import prewatch_release_readback as r
-from tests.test_prewatch_ready import DAY, RUN, ARCH, TAG, NOW
+DAY = "2026-11-25"
+RUN = "20261125T075221791585Z"
+ARCH = f"rikstoto-program-{DAY}-{RUN}"
+TAG = f"prewatch-src-{DAY}-S2_NR_{DAY}-p1-{RUN}"
+NOW = r.stamp("2026-11-25T08:10:03Z")
 
 INDEX = {"date_oslo": DAY, "run_id": RUN, "meeting_feeds": [{"release_tag": TAG}]}
 MARKER = {"id": r.MARKER_ID, "tag_name": r.MARKER_TAG, "draft": True, "published_at": None}
