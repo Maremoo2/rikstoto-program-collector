@@ -156,7 +156,7 @@ def validate_race(folder, index, q, now, releases, min_seconds):
     require(tag.startswith(f"prewatch-src-{day}-{mid}-") and tag.endswith("-" + run), "MEETING_TAG_INVALID")
     archive_id, meeting_id = releases.get(index["source_archive_tag"]), releases.get(tag)
     require(type(archive_id) is int and archive_id > 0 and type(meeting_id) is int and meeting_id > 0, "RELEASE_ID_UNVERIFIED")
-    meta = {"race_id": pack["race_id"], "ledger_race_id": f"{day}|{race['track']}|{n}",
+    meta = {"race_id": pack["race_id"], "ledger_race_id": unicodedata.normalize("NFC", f"{day}|{race['track']}|{n}"),
             "scheduled_start_iso": start.isoformat(), "active_numbers": active,
             "scratch_numbers": sorted(set(by_number) - set(active)), "history_rows": sum(len(by_number[k]["past_starts"]) for k in active),
             "history_complete_five": all(len(by_number[k]["past_starts"]) >= 5 for k in active),

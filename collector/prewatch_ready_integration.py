@@ -13,7 +13,7 @@ import re
 import subprocess
 import zipfile
 
-from .prewatch_ready import build_ready, digest, encoded, require, stamp
+from .prewatch_ready import OSLO, build_ready, digest, encoded, require, stamp
 
 REPO = "Maremoo2/rikstoto-program-collector"
 OBS = re.compile(r"^SNAPSHOT_OBSERVED_UTC=([^ |\n]+) \| SOURCE_CLOCK=LATEST_OFFICIAL_ROSTER_RECEIPT$", re.M)
@@ -117,11 +117,22 @@ def verify_sources(feed, archive, notes, records, now):
     return release_ids
 
 
-def prepare(feed, archive, notes, records, now, *, replay=False):
+def prepare(feed, archive, notes, records, now, *, replay=False, read_ledger=False):
     ids = verify_sources(feed, archive, notes, records, now)
-    packet = build_ready([feed], ids, now, replay=replay)
+    require(not (replay and read_ledger), "LIVE_LEDGER_REPLAY_FORBIDDEN")
+    ledger = None
+    if read_ledger:
+        from .prewatch_ledger_reader import read_live
+        ledger = read_live(now.astimezone(OSLO).date().isoformat())
+        require(ledger["evidence_kind"] == "GOOGLE_API_READ", "LEDGER_EVIDENCE_INVALID")
+        now = datetime.now(timezone.utc)
+        require(0 <= (now - stamp(ledger["read_finished_utc"])).total_seconds() <= 120, "LEDGER_STALE")
+    packet = build_ready([feed], ids, now, replay=replay,
+                         completed=None if ledger is None else set(ledger["completed_ids"]))
+    if ledger is not None:
+        packet["ledger_evidence"] = {k: v for k, v in ledger.items() if k != "completed_ids"}
     packet["transport_evidence"] = "NUMERIC_RELEASE_BODY_AND_ORIGINAL_ARCHIVE_SHA_VERIFIED"
-    packet["operational_publication_allowed"] = False  # no authenticated Ledger integration yet
+    packet["operational_publication_allowed"] = False  # remains disabled until verified endpoint and approved activation
     require(len(encoded(packet)) <= 95_000, "READY_PACKET_TOO_LARGE")
     return packet
 
@@ -133,13 +144,14 @@ def main():
     p.add_argument("--notes", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--evidence", type=Path, help="Offline authenticated readback receipt; replay only")
+    p.add_argument("--read-ledger", action="store_true", help="Require authenticated read-only Ledger; still no publication")
     p.add_argument("--replay-at", help="Explicit archived test clock, not a live freeze")
     a = p.parse_args()
     require(bool(a.evidence) == bool(a.replay_at), "OFFLINE_EVIDENCE_REQUIRES_REPLAY_CLOCK")
     idx = json.loads((a.feed / "index.json").read_bytes())
     records = json.loads(a.evidence.read_bytes()) if a.evidence else release_evidence(idx)
     now = stamp(a.replay_at) if a.replay_at else datetime.now(timezone.utc)
-    packet = prepare(a.feed, a.archive, a.notes, records, now, replay=bool(a.replay_at))
+    packet = prepare(a.feed, a.archive, a.notes, records, now, replay=bool(a.replay_at), read_ledger=a.read_ledger)
     raw = encoded(packet)
     with a.output.open("xb") as f:
         f.write(raw)
