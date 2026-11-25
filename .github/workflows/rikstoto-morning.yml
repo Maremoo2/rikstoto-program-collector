@@ -240,6 +240,7 @@ jobs:
           # This release is only a DRAFT visible to the authenticated owner.
           # Release.body also contains a compact index so ChatGPT Pre-Watch
           # can find the exact immutable meeting feed by run and date.
+          cp "$RELEASE_NOTES" "$RELEASE_NOTES.prewatch-original"
           printf '\n\n' >> "$RELEASE_NOTES"
           cat prewatch_feed/index.md >> "$RELEASE_NOTES"
           if ! gh release view "$RELEASE_TAG" --repo "$GH_REPO" >/dev/null 2>&1; then
@@ -286,4 +287,14 @@ jobs:
           done < /tmp/prewatch_release_manifest.tsv
           echo "Pre-Watch read-only draft feeds created or found:"
           wc -l < /tmp/prewatch_release_manifest.tsv
-
+      - name: Verify and prepare ready packet (diagnostic only, no publication)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ZIP_FILE: ${{ steps.package.outputs.archive }}
+        run: |
+          set -euo pipefail
+          python -m collector.prewatch_ready_integration \
+            --feed prewatch_feed --archive "$ZIP_FILE" \
+            --notes "${{ steps.package.outputs.notes }}.prewatch-original" \
+            --output "$RUNNER_TEMP/prewatch-ready.json"
+          # Do not upload real ready packets as public Actions artifacts.

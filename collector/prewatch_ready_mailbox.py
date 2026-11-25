@@ -24,6 +24,8 @@ def prepare_update(packet, release, draft_id, now):
     require(packet.get("schema") == SCHEMA and packet.get("replay_only") is False
             and packet.get("phase_a_completed") is False and packet.get("bet_authority") is False
             and packet.get("freeze_recheck_required") is True, "UNSAFE_PACKET")
+    require(packet.get("operational_publication_allowed") is True
+            and packet.get("ledger_exclusion") == "CALLER_SUPPLIED_VERIFIED_IDS", "LEDGER_OR_PUBLICATION_NOT_VERIFIED")
     ref = stamp(packet["reference_utc"])
     require(packet.get("generated_at_utc") == packet["reference_utc"]
             and packet.get("date_oslo") == now.astimezone(OSLO).date().isoformat()
@@ -38,6 +40,8 @@ def prepare_update(packet, release, draft_id, now):
     require(previous.get("schema") == SCHEMA and previous.get("bet_authority") is False, "MAILBOX_MARKER_INVALID")
     if previous.get("reference_utc"):
         require(stamp(previous["reference_utc"]) <= ref, "MAILBOX_NEWER_THAN_PACKET")
+        if stamp(previous["reference_utc"]) == ref:
+            require(previous == packet, "MAILBOX_SAME_CLOCK_CONFLICT")
     body = encoded(packet).decode("utf-8")
     require(len(body.encode("utf-8")) <= 95_000, "READY_PACKET_TOO_LARGE")
     return {"body": body}

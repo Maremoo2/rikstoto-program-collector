@@ -158,10 +158,13 @@ def test_latest_observation(tmp_path):
 
 def test_mailbox_guards(tmp_path):
     fixture(tmp_path)
-    packet = build(tmp_path)
+    packet = build(tmp_path, completed=set())
+    packet["operational_publication_allowed"] = True
     mailbox = {"id": 9, "tag_name": "prewatch-ready-v1", "draft": True, "published_at": None, "assets": [],
                "body": json.dumps({"schema": "prewatch_ready_v1", "bet_authority": False})}
     assert json.loads(prepare_update(packet, mailbox, 9, NOW)["body"]) == packet
+    with pytest.raises(ValueError, match="LEDGER_OR_PUBLICATION_NOT_VERIFIED"):
+        prepare_update(build(tmp_path), mailbox, 9, NOW)
     with pytest.raises(ValueError, match="UNSAFE_PACKET"):
         prepare_update(build(tmp_path, replay=True), mailbox, 9, NOW)
     with pytest.raises(ValueError, match="UNSAFE_MAILBOX"):

@@ -24,6 +24,8 @@ MID = re.compile(r"[A-Z0-9]+_NR_\d{4}-\d{2}-\d{2}\Z")
 
 
 def stamp(value):
+    if not isinstance(value, str):
+        raise ValueError("TIMESTAMP_INVALID")
     t = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if t.tzinfo is None:
         raise ValueError("NAIVE_TIMESTAMP")
