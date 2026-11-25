@@ -37,7 +37,8 @@ def context(env):
             "SHADOW_CONTEXT_INVALID")
     mode = env.get("SHADOW_MODE")
     require(mode in {"shadow_preflight", "shadow_publish", "shadow_consume"}, "SHADOW_MODE_INVALID")
-    require(mode != "shadow_publish" or env.get("SHADOW_APPROVAL") == APPROVAL, "SHADOW_APPROVAL_REQUIRED")
+    require(mode != "shadow_publish" or (env.get("SHADOW_APPROVAL") == APPROVAL
+            and env.get("SHADOW_CONSUMER_GUARD_VERIFIED") == "true"), "SHADOW_APPROVAL_REQUIRED")
     require(all(re.fullmatch(r"[0-9]{1,20}", env.get(k, "")) for k in ("COLLECTOR_RUN_ID", "GITHUB_RUN_ID")),
             "SHADOW_RUN_ID_INVALID")
     require(bool(env.get("PREWATCH_LEDGER_ACCESS_TOKEN")), "SHADOW_LEDGER_TOKEN_REQUIRED")

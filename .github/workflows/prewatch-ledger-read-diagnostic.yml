@@ -17,6 +17,10 @@ on:
         description: "Explicit approval of draft-capable GitHub token for integration or shadow"
         type: boolean
         default: false
+      shadow_consumer_guard_verified:
+        description: "Publish only: separately verified that active Pre-Watch rejects SHADOW_ONLY"
+        type: boolean
+        default: false
       shadow_approval:
         description: "Publish only: exact owner approval PUBLISH_SHADOW_ONLY_458013574"
         type: string
@@ -321,7 +325,7 @@ jobs:
 
   shadow:
     # Manual, exact main only. Never executes for existing modes or schedules.
-    if: github.repository_id == '1424144324' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.approve_draft_readback == true && (inputs.mode == 'shadow_preflight' || inputs.mode == 'shadow_consume' || (inputs.mode == 'shadow_publish' && inputs.shadow_approval == 'PUBLISH_SHADOW_ONLY_458013574'))
+    if: github.repository_id == '1424144324' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.approve_draft_readback == true && (inputs.mode == 'shadow_preflight' || inputs.mode == 'shadow_consume' || (inputs.mode == 'shadow_publish' && inputs.shadow_consumer_guard_verified == true && inputs.shadow_approval == 'PUBLISH_SHADOW_ONLY_458013574'))
     runs-on: ubuntu-latest
     timeout-minutes: 8
     concurrency:
@@ -334,6 +338,7 @@ jobs:
     env:
       COLLECTOR_RUN_ID: ${{ inputs.collector_run_id }}
       SHADOW_MODE: ${{ inputs.mode }}
+      SHADOW_CONSUMER_GUARD_VERIFIED: ${{ inputs.shadow_consumer_guard_verified }}
     steps:
       - name: Load trusted main modules and verified existing source artifact
         env:
@@ -391,7 +396,7 @@ jobs:
           python3 -m collector.prewatch_shadow_mailbox
 
   shadow-approval-required:
-    if: github.repository_id == '1424144324' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && (inputs.mode == 'shadow_preflight' || inputs.mode == 'shadow_publish' || inputs.mode == 'shadow_consume') && (inputs.approve_draft_readback != true || (inputs.mode == 'shadow_publish' && inputs.shadow_approval != 'PUBLISH_SHADOW_ONLY_458013574'))
+    if: github.repository_id == '1424144324' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && (inputs.mode == 'shadow_preflight' || inputs.mode == 'shadow_publish' || inputs.mode == 'shadow_consume') && (inputs.approve_draft_readback != true || (inputs.mode == 'shadow_publish' && (inputs.shadow_consumer_guard_verified != true || inputs.shadow_approval != 'PUBLISH_SHADOW_ONLY_458013574')))
     runs-on: ubuntu-latest
     permissions: {}
     steps:

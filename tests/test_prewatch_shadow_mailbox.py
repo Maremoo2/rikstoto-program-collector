@@ -24,7 +24,7 @@ def packet():
 def env(mode="shadow_preflight", approval=""):
     return {"GITHUB_ACTIONS":"true","GITHUB_REPOSITORY_ID":str(s.releases.REPO_ID),"GITHUB_REF":"refs/heads/main",
             "GITHUB_WORKFLOW_REF":s.WORKFLOW,"GITHUB_EVENT_NAME":"workflow_dispatch","GITHUB_JOB":"shadow",
-            "SHADOW_MODE":mode,"SHADOW_APPROVAL":approval,"COLLECTOR_RUN_ID":"123","GITHUB_RUN_ID":"456",
+            "SHADOW_MODE":mode,"SHADOW_APPROVAL":approval,"SHADOW_CONSUMER_GUARD_VERIFIED":"true","COLLECTOR_RUN_ID":"123","GITHUB_RUN_ID":"456",
             "PREWATCH_LEDGER_ACCESS_TOKEN":"synthetic"}
 
 
@@ -93,6 +93,7 @@ def test_final_clock_gate():
     assert s.final_gate(p,NOW,NOW,l,clock=lambda:NOW)==NOW
     with pytest.raises(ValueError,match="SHADOW_FINAL_RECHECK_EXPIRED"):
         s.final_gate(p,NOW,NOW,l,clock=lambda:NOW+timedelta(seconds=31))
+    p["ledger_evidence"]["read_finished_utc"] = (NOW+timedelta(minutes=9)).isoformat()
     with pytest.raises(ValueError,match="DIAGNOSTIC_PACKET_EXPIRED"):
         s.final_gate(p,NOW,NOW,l,clock=lambda:NOW+timedelta(minutes=9))
 
@@ -114,3 +115,64 @@ def test_newer_archive_fail_closed():
     assert s.current_archive(idx,getter=lambda path:[marker,original],clock=lambda:NOW)==NOW
     with pytest.raises(ValueError,match="SHADOW_NEWER_ARCHIVE_AVAILABLE"):
         s.current_archive(idx,getter=lambda path:[marker,original,newer],clock=lambda:NOW)
+
+
+def test_patch_exact_id_body_only_and_guard(monkeypatch):
+    e=env("shadow_publish",s.APPROVAL)
+    e["GH_TOKEN"]="synthetic"
+    body=encoded(s.envelope(packet(),"123")).decode()
+    with pytest.raises(ValueError,match="SHADOW_APPROVAL_REQUIRED"):
+        s.patch_body(body,dict(e,SHADOW_CONSUMER_GUARD_VERIFIED="false"))
+    class Response:
+        status=200
+        def __enter__(self): return self
+        def __exit__(self,*args): return False
+    class Opener:
+        def open(self,req,timeout):
+            assert req.full_url == "https://api.github.com/repos/"+s.releases.REPO+"/releases/458013574"
+            assert req.get_method()=="PATCH"
+            assert json.loads(req.data)=={"body":body}
+            return Response()
+    monkeypatch.setattr(s.urllib.request,"build_opener",lambda *a:Opener())
+    s.patch_body(body,e)
+
+
+def test_consumer_full_field_reconstruction(tmp_path,monkeypatch):
+    from tests.test_prewatch_ready_integration import source_fixture
+    from collector.prewatch_ready_integration import prepare, verify_sources
+    from collector.prewatch_ledger_reader import SCOPE
+    from pathlib import Path
+    feed,archive,notes,records=source_fixture(tmp_path)
+    monkeypatch.setattr("collector.prewatch_ready_integration.utcnow",lambda:NOW)
+    monkeypatch.setattr("collector.prewatch_ledger_reader.read_live",lambda day:{
+        "evidence_kind":"GOOGLE_API_READ","scope":SCOPE,"read_finished_utc":NOW.isoformat(),"completed_ids":[]})
+    p=prepare(feed,archive,notes,records,NOW,read_ledger=True)
+    idx=json.loads((feed/"index.json").read_bytes())
+    ids=verify_sources(feed,archive,notes,records,NOW)
+    v=s.envelope(p,"123")
+    assert s.validate_consumed(v,feed,idx,ids,NOW)==p
+    p["selected"]["source_pack"]["program"]["entrants"]=[]
+    with pytest.raises(ValueError,match="SHADOW_FULL_FIELD_MISMATCH"):
+        s.validate_consumed(s.envelope(p,"123"),feed,idx,ids,NOW)
+
+
+def test_roster_recheck_rejects_changed_official_payload(tmp_path):
+    from zipfile import ZipFile
+    from tests.test_prewatch_ready import MID, RUN
+    p=packet()
+    p["collector_run_id"]=RUN
+    start={"success":True,"result":{"1":[{"startNumber":1,"isScratched":False}]}}
+    changes={"success":True,"result":[]}
+    prefix=f"{DAY}/{RUN}/meetings/{MID}/"
+    archive=tmp_path/"original.zip"
+    roster={}
+    with ZipFile(archive,"w") as z:
+        for key,name,path,raw in (("starts_source","starts",f"/api/racedays/{MID}/starts",start),
+                                  ("driver_changes_source","driver_changes",f"/api/game/program/{MID}/driverChanges",changes)):
+            data=encoded(raw);z.writestr(prefix+name+".raw.json",data)
+            roster[key]={"url":"https://www.rikstoto.no"+path,"sha256":digest(data)}
+    p["selected"]["source_pack"]={"program":{"race":{"meeting_id":MID,"race_number":1}},"official_roster":roster}
+    assert s.recheck_roster(p,archive,getter=lambda u:start if u.endswith("/starts") else changes,clock=lambda:NOW)==NOW
+    changed=deepcopy(start);changed["result"]["1"][0]["isScratched"]=True
+    with pytest.raises(ValueError,match="SHADOW_ROSTER_CHANGED_REFRESH_REQUIRED"):
+        s.recheck_roster(p,archive,getter=lambda u:changed if u.endswith("/starts") else changes,clock=lambda:NOW)
