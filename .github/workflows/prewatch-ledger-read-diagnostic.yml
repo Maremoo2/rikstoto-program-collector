@@ -10,12 +10,23 @@ on:
           - auth_only
           - full_integration
           - release_probe
+          - shadow_preflight
+          - shadow_publish
+          - shadow_consume
       approve_draft_readback:
-        description: "Explicit approval for isolated GET-only job with contents:write (full integration)"
+        description: "Explicit approval of draft-capable GitHub token for integration or shadow"
         type: boolean
         default: false
+      shadow_consumer_guard_verified:
+        description: "Publish only: separately verified that active Pre-Watch rejects SHADOW_ONLY"
+        type: boolean
+        default: false
+      shadow_approval:
+        description: "Publish only: exact owner approval PUBLISH_SHADOW_ONLY_458013574"
+        type: string
+        required: false
       collector_run_id:
-        description: "Completed main Collector workflow run ID (full integration only)"
+        description: "Completed main Collector workflow run ID (integration and shadow)"
         type: string
         required: false
 permissions: {}
@@ -310,3 +321,83 @@ jobs:
               print(code if re.fullmatch(r"[A-Z][A-Z0-9_]{2,79}", code) else "INTEGRATION_DIAGNOSTIC_FAILED")
               sys.exit(1)
           PY
+
+
+  shadow:
+    # Manual, exact main only. Never executes for existing modes or schedules.
+    if: github.repository_id == '1424144324' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.approve_draft_readback == true && (inputs.mode == 'shadow_preflight' || inputs.mode == 'shadow_consume' || (inputs.mode == 'shadow_publish' && inputs.shadow_consumer_guard_verified == true && inputs.shadow_approval == 'PUBLISH_SHADOW_ONLY_458013574'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    concurrency:
+      group: prewatch-shadow-mailbox-458013574
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      actions: read
+      id-token: write
+    env:
+      COLLECTOR_RUN_ID: ${{ inputs.collector_run_id }}
+      SHADOW_MODE: ${{ inputs.mode }}
+      SHADOW_CONSUMER_GUARD_VERIFIED: ${{ inputs.shadow_consumer_guard_verified }}
+    steps:
+      - name: Load trusted main modules and verified existing source artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$COLLECTOR_RUN_ID" =~ ^[0-9]{1,20}$ ]] || { echo INVALID_COLLECTOR_RUN_ID; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$COLLECTOR_RUN_ID" > "$RUNNER_TEMP/shadow-source-run.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          d=json.loads((Path(os.environ["RUNNER_TEMP"])/"shadow-source-run.json").read_text())
+          if not (d["id"] == int(os.environ["COLLECTOR_RUN_ID"]) and
+                  d["repository"]["id"] == 1424144324 and d["workflow_id"] == 388333234 and
+                  d["head_branch"] == "main" and d["event"] in {"schedule","workflow_dispatch"} and
+                  d["status"] == "completed" and d["conclusion"] == "success"):
+              raise SystemExit("SOURCE_RUN_NOT_APPROVED")
+          print("SHADOW_SOURCE_RUN_IDENTITY_PASS")
+          PY
+          mkdir -p "$RUNNER_TEMP/shadow-code/collector" "$RUNNER_TEMP/shadow-source"
+          touch "$RUNNER_TEMP/shadow-code/collector/__init__.py"
+          for name in prewatch_ready prewatch_ledger_reader prewatch_ready_integration prewatch_release_readback prewatch_shadow_mailbox; do
+            gh api "repos/$GITHUB_REPOSITORY/contents/collector/$name.py?ref=$GITHUB_SHA" --jq '.content' | base64 -d > "$RUNNER_TEMP/shadow-code/collector/$name.py"
+            test -s "$RUNNER_TEMP/shadow-code/collector/$name.py"
+          done
+          gh run download "$COLLECTOR_RUN_ID" --repo "$GITHUB_REPOSITORY" --name prewatch-bridge-fallback --dir "$RUNNER_TEMP/shadow-source"
+      - name: Require configured Google Viewer identity
+        env:
+          PROVIDER: ${{ vars.PREWATCH_WIF_PROVIDER }}
+          SERVICE_ACCOUNT: ${{ vars.PREWATCH_LEDGER_READER_SA }}
+          LEDGER_ID: ${{ secrets.PREWATCH_LEDGER_SPREADSHEET_ID }}
+        run: |
+          set -euo pipefail
+          [[ -n "$PROVIDER" && -n "$SERVICE_ACCOUNT" && "$LEDGER_ID" =~ ^[A-Za-z0-9_-]{20,120}$ ]] || { echo LEDGER_AUTH_CONFIGURATION_MISSING_OR_INVALID; exit 1; }
+      - name: Obtain short-lived Sheets read-only token
+        id: shadow_auth
+        uses: google-github-actions/auth@c200f3691d83b41bf9bbd8638997a462592937ed # v2.1.13
+        with:
+          workload_identity_provider: ${{ vars.PREWATCH_WIF_PROVIDER }}
+          service_account: ${{ vars.PREWATCH_LEDGER_READER_SA }}
+          token_format: access_token
+          access_token_lifetime: 300s
+          access_token_scopes: https://www.googleapis.com/auth/spreadsheets.readonly
+          create_credentials_file: false
+          export_environment_variables: false
+      - name: Run shadow protocol (no public packet or Ledger artifact)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PREWATCH_LEDGER_SPREADSHEET_ID: ${{ secrets.PREWATCH_LEDGER_SPREADSHEET_ID }}
+          PREWATCH_LEDGER_ACCESS_TOKEN: ${{ steps.shadow_auth.outputs.access_token }}
+          SHADOW_APPROVAL: ${{ inputs.shadow_approval }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/shadow-code"
+          python3 -m collector.prewatch_shadow_mailbox
+
+  shadow-approval-required:
+    if: github.repository_id == '1424144324' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && (inputs.mode == 'shadow_preflight' || inputs.mode == 'shadow_publish' || inputs.mode == 'shadow_consume') && (inputs.approve_draft_readback != true || (inputs.mode == 'shadow_publish' && (inputs.shadow_consumer_guard_verified != true || inputs.shadow_approval != 'PUBLISH_SHADOW_ONLY_458013574')))
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - run: echo SHADOW_APPROVAL_REQUIRED; exit 1
