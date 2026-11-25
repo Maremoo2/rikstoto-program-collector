@@ -8,10 +8,15 @@ import json
 import os
 import re
 import unicodedata
+import urllib.error
+import urllib.parse
+import urllib.request
 
 from .prewatch_ready import OSLO, digest, encoded, require, stamp
 
 SPREADSHEET_ID_ENV = "PREWATCH_LEDGER_SPREADSHEET_ID"
+ACCESS_TOKEN_ENV = "PREWATCH_LEDGER_ACCESS_TOKEN"
+MAX_RESPONSE_BYTES = 8_388_608
 SCOPE = "https://www.googleapis.com/auth/spreadsheets.readonly"
 URL = "https://sheets.googleapis.com/v4/spreadsheets/{}/values:batchGet"
 RANGES = ("RaceAssessments!A1:AG", "RaceFieldSnapshots!A1:U")
@@ -126,6 +131,41 @@ def validate_values(assessments, fields, day, now):
             "values_sha256": digest(encoded([assessments, fields]))}
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+class _TokenResponse:
+    def __init__(self, status, body=b""):
+        self.status_code = status
+        self._body = body
+
+    def json(self):
+        return json.loads(self._body)
+
+
+class _TokenSession:
+    """Use an explicitly provisioned short-lived Sheets access token; no key file."""
+    def __init__(self, token):
+        require(isinstance(token, str) and bool(token) and not any(c.isspace() for c in token),
+                "LEDGER_ACCESS_TOKEN_INVALID")
+        self._token = token
+
+    def get(self, url, params, timeout):
+        require(re.fullmatch(r"https://sheets\.googleapis\.com/v4/spreadsheets/[A-Za-z0-9_-]{20,120}/values:batchGet", url),
+                "LEDGER_URL_INVALID")
+        req = urllib.request.Request(url + "?" + urllib.parse.urlencode(params),
+                                     headers={"Authorization": "Bearer " + self._token}, method="GET")
+        try:
+            with urllib.request.build_opener(_NoRedirect()).open(req, timeout=timeout) as response:
+                raw = response.read(MAX_RESPONSE_BYTES + 1)
+                require(len(raw) <= MAX_RESPONSE_BYTES, "LEDGER_RESPONSE_TOO_LARGE")
+                return _TokenResponse(response.status, raw)
+        except urllib.error.HTTPError as exc:
+            return _TokenResponse(exc.code)
+
+
 def read_live(day, *, session=None, clock_now=None):
     """Google ADC with read-only scope; injectable session only for offline tests."""
     now = clock_now or (lambda: datetime.now(timezone.utc))
@@ -135,10 +175,14 @@ def read_live(day, *, session=None, clock_now=None):
     test_mode = session is not None or clock_now is not None
     if session is None:
         try:
-            import google.auth
-            from google.auth.transport.requests import AuthorizedSession
-            credentials, _ = google.auth.default(scopes=[SCOPE])
-            session = AuthorizedSession(credentials)
+            token = os.environ.get(ACCESS_TOKEN_ENV)
+            if token is not None:
+                session = _TokenSession(token)
+            else:
+                import google.auth
+                from google.auth.transport.requests import AuthorizedSession
+                credentials, _ = google.auth.default(scopes=[SCOPE])
+                session = AuthorizedSession(credentials)
         except Exception:
             raise ValueError("LEDGER_AUTH_UNAVAILABLE") from None
     params = [("ranges", r) for r in RANGES] + [

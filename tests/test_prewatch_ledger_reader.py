@@ -141,3 +141,44 @@ def test_malformed_response_has_safe_error(monkeypatch):
             return BadResponse()
     with pytest.raises(ValueError, match="^LEDGER_RESPONSE_INVALID$"):
         read_live(DAY, session=BadSession(), clock_now=lambda: NOW)
+
+
+def test_short_lived_token_session_get_and_no_redirect(monkeypatch):
+    import json
+    from collector.prewatch_ledger_reader import _TokenSession, _NoRedirect, URL, RANGES
+    class HTTP:
+        status = 200
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def read(self, limit):
+            return json.dumps(Response().json()).encode()
+    class Opener:
+        def open(self, req, timeout):
+            assert req.get_method() == "GET"
+            assert req.full_url.startswith(URL.format(SPREADSHEET_ID) + "?")
+            assert req.get_header("Authorization") == "Bearer synthetic-token"
+            assert timeout == 30
+            return HTTP()
+    def builder(handler):
+        assert isinstance(handler, _NoRedirect)
+        assert handler.redirect_request(None, None, 302, None, None, "https://example.invalid") is None
+        return Opener()
+    monkeypatch.setattr("urllib.request.build_opener", builder)
+    response = _TokenSession("synthetic-token").get(URL.format(SPREADSHEET_ID), [("ranges", r) for r in RANGES], 30)
+    assert response.status_code == 200
+    assert response.json()["spreadsheetId"] == SPREADSHEET_ID
+    with pytest.raises(ValueError, match="LEDGER_URL_INVALID"):
+        _TokenSession("synthetic-token").get("https://example.invalid", [], 30)
+
+
+def test_explicit_token_path_never_uses_adc(monkeypatch):
+    from collector.prewatch_ledger_reader import ACCESS_TOKEN_ENV
+    monkeypatch.setenv(SPREADSHEET_ID_ENV, SPREADSHEET_ID)
+    monkeypatch.setenv(ACCESS_TOKEN_ENV, "synthetic-token")
+    def fake(token):
+        assert token == "synthetic-token"
+        return Session()
+    monkeypatch.setattr("collector.prewatch_ledger_reader._TokenSession", fake)
+    result = read_live(DAY, clock_now=lambda: NOW)
+    assert result["completed_ids"] == [RACE]
+    assert result["evidence_kind"] == "INJECTED_TEST_SESSION"
