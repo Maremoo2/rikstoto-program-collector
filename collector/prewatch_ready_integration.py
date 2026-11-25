@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime, timezone
 import json
+import os
 from pathlib import Path
 import re
 import subprocess
@@ -32,16 +33,21 @@ def observe(release):
 
 def release_evidence(index):
     """Numeric lookups, never assume draft tag endpoints or list order work."""
+    from .prewatch_release_readback import index_tags
     pages = gh_json(f"repos/{REPO}/releases?per_page=100", "--paginate", "--slurp")
+    require(isinstance(pages, list) and all(isinstance(page, list) for page in pages), "RELEASE_LIST_SHAPE_INVALID")
     rows = [r for page in pages for r in page]
-    day = index["date_oslo"]
-    wanted = {m["release_tag"] for m in index["meeting_feeds"]}
-    archives = [r for r in rows if r.get("tag_name", "").startswith(f"rikstoto-program-{day}-") and r.get("draft") is True]
-    tags = wanted | {r["tag_name"] for r in archives}
+    require(all(isinstance(r, dict) and type(r.get("id")) is int and isinstance(r.get("tag_name"), str)
+                for r in rows), "RELEASE_LIST_ROW_INVALID")
+    require(len({r["id"] for r in rows}) == len(rows), "RELEASE_PAGINATION_DUPLICATE_ID")
+    day, _, archive, wanted = index_tags(index)
+    archives = [r for r in rows if r["tag_name"].startswith(f"rikstoto-program-{day}-")]
+    tags = wanted | {archive} | {r["tag_name"] for r in archives}
     records = []
     for tag in sorted(tags):
         matching = [r for r in rows if r.get("tag_name") == tag]
-        require(len(matching) == 1, "RELEASE_TAG_NOT_UNIQUE")
+        require(bool(matching), "RELEASE_TAG_MISSING_OR_NOT_VISIBLE")
+        require(len(matching) == 1, "RELEASE_TAG_DUPLICATE")
         rid = matching[0]["id"]
         r = gh_json(f"repos/{REPO}/releases/{rid}")
         require(r.get("id") == rid and r.get("tag_name") == tag, "RELEASE_IDENTITY_MISMATCH")
@@ -55,7 +61,7 @@ def release_evidence(index):
     return records
 
 
-def verify_sources(feed, archive, notes, records, now):
+def verify_sources(feed, archive, notes, records, now, *, verified_receipt=False):
     index = json.loads((feed / "index.json").read_bytes())
     day, run = index["date_oslo"], index["run_id"]
     archive_tag = f"rikstoto-program-{day}-{run}"
@@ -68,17 +74,25 @@ def verify_sources(feed, archive, notes, records, now):
         require(r.get("draft") is True and r.get("published_at") is None, "RELEASE_NOT_PRIVATE_DRAFT")
         by_tag[tag] = r
         ids.add(rid)
-    candidates = [(observe(r), t) for t, r in by_tag.items() if t.startswith(f"rikstoto-program-{day}-")]
+    def receipt_observation(r):
+        return stamp(r["observed_utc"]) if verified_receipt else observe(r)
+    candidates = [(receipt_observation(r), t) for t, r in by_tag.items() if t.startswith(f"rikstoto-program-{day}-")]
     require(candidates and all(t <= now for t, _ in candidates), "ARCHIVE_CLOCK_INVALID")
+    require(archive_tag in by_tag, "ARCHIVE_RELEASE_MISSING")
     require(max(candidates)[1] == archive_tag, "NEWER_ARCHIVE_AVAILABLE")
     original = by_tag[archive_tag]
-    require(observe(original) == stamp(index["snapshot_observed_utc"]), "INDEX_OBSERVATION_MISMATCH")
+    require(receipt_observation(original) == stamp(index["snapshot_observed_utc"]), "INDEX_OBSERVATION_MISMATCH")
     body = notes.read_bytes() + b"\n\n" + (feed / "index.md").read_bytes()
-    require(digest(body) == original["body_sha256"] and body.decode() == original["body"], "ARCHIVE_RELEASE_BODY_MISMATCH")
+    require(digest(body) == original["body_sha256"], "ARCHIVE_RELEASE_BODY_MISMATCH")
+    if not verified_receipt:
+        require(body.decode() == original["body"], "ARCHIVE_RELEASE_BODY_MISMATCH")
+    else:
+        require(observe({"body": body.decode()}) == receipt_observation(original), "INDEX_OBSERVATION_MISMATCH")
     assets = [a for a in original["assets"] if a["name"] == archive.name]
     require(len(assets) == 1 and assets[0].get("digest") == "sha256:" + digest(archive.read_bytes()), "ARCHIVE_ASSET_SHA_MISMATCH")
     release_ids = {archive_tag: original["id"]}
     for m in index["meeting_feeds"]:
+        require(m["release_tag"] in by_tag, "MEETING_RELEASE_MISSING")
         r = by_tag[m["release_tag"]]
         actual = digest((feed / m["markdown_name"]).read_bytes())
         require(actual == m["sha256"] == r["body_sha256"], "MEETING_RELEASE_BODY_MISMATCH")
@@ -135,6 +149,10 @@ def check_live_packet(packet, now):
     reference = stamp(packet["reference_utc"])
     require(now >= reference and now.astimezone(OSLO).date().isoformat() == packet["date_oslo"],
             "DIAGNOSTIC_CLOCK_INVALID")
+    if "release_receipt" in packet:
+        from .prewatch_release_readback import MAX_RECEIPT_AGE
+        finish = stamp(packet["release_receipt"]["read_finished_utc"])
+        require(0 <= (now - finish).total_seconds() <= MAX_RECEIPT_AGE, "RELEASE_RECEIPT_STALE")
     if "ledger_evidence" in packet:
         finish = stamp(packet["ledger_evidence"]["read_finished_utc"])
         require(0 <= (now - finish).total_seconds() <= 120, "LEDGER_STALE")
@@ -144,9 +162,10 @@ def check_live_packet(packet, now):
         require(remaining >= packet["min_analysis_window_seconds"], "DIAGNOSTIC_PACKET_EXPIRED")
 
 
-def prepare(feed, archive, notes, records, now, *, replay=False, read_ledger=False):
+def prepare(feed, archive, notes, records, now, *, replay=False, read_ledger=False, release_receipt=None):
     require(not (replay and read_ledger), "LIVE_LEDGER_REPLAY_FORBIDDEN")
-    ids = verify_sources(feed, archive, notes, records, now)
+    require(not (replay and release_receipt is not None), "LIVE_RELEASE_REPLAY_FORBIDDEN")
+    ids = verify_sources(feed, archive, notes, records, now, verified_receipt=release_receipt is not None)
     # Source verification and network I/O consume time. Never score eligibility at
     # an earlier clock just because the archive was fresh when verification started.
     if not replay:
@@ -163,6 +182,8 @@ def prepare(feed, archive, notes, records, now, *, replay=False, read_ledger=Fal
                          completed=None if ledger is None else set(ledger["completed_ids"]))
     if ledger is not None:
         packet["ledger_evidence"] = {k: v for k, v in ledger.items() if k != "completed_ids"}
+    if release_receipt is not None:
+        packet["release_receipt"] = {k: v for k, v in release_receipt.items() if k != "records"}
     packet["transport_evidence"] = "NUMERIC_RELEASE_BODY_AND_ORIGINAL_ARCHIVE_SHA_VERIFIED"
     packet["diagnostic_status"] = ("REPLAY_ONLY" if replay else
                                    "LIVE_LEDGER_SOURCE_DIAGNOSTIC" if read_ledger else "SOURCE_ONLY_DIAGNOSTIC")
@@ -185,9 +206,18 @@ def main():
     a = p.parse_args()
     require(bool(a.evidence) == bool(a.replay_at), "OFFLINE_EVIDENCE_REQUIRES_REPLAY_CLOCK")
     idx = json.loads((a.feed / "index.json").read_bytes())
-    records = json.loads(a.evidence.read_bytes()) if a.evidence else release_evidence(idx)
-    now = stamp(a.replay_at) if a.replay_at else datetime.now(timezone.utc)
-    packet = prepare(a.feed, a.archive, a.notes, records, now, replay=bool(a.replay_at), read_ledger=a.read_ledger)
+    live_raw = os.environ.get("PREWATCH_LIVE_RELEASE_RECEIPT")
+    receipt = None
+    if live_raw is not None:
+        require(not a.evidence and not a.replay_at and a.read_ledger, "LIVE_RELEASE_RECEIPT_MODE_INVALID")
+        from .prewatch_release_readback import validate_receipt
+        receipt = json.loads(live_raw)
+        records = validate_receipt(receipt, idx, os.environ, utcnow())
+    else:
+        records = json.loads(a.evidence.read_bytes()) if a.evidence else release_evidence(idx)
+    now = stamp(a.replay_at) if a.replay_at else utcnow()
+    packet = prepare(a.feed, a.archive, a.notes, records, now, replay=bool(a.replay_at),
+                     read_ledger=a.read_ledger, release_receipt=receipt)
     raw = encoded(packet)
     created = False
     try:

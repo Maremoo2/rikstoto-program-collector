@@ -129,3 +129,28 @@ def test_live_source_expiry_during_packet_build(tmp_path, monkeypatch):
     monkeypatch.setattr("collector.prewatch_ready_integration.utcnow", lambda: next(clocks))
     with pytest.raises(ValueError, match="DIAGNOSTIC_PACKET_EXPIRED"):
         prepare(*args, NOW)
+
+
+def test_receipt_digest_verifies_original_without_body(tmp_path, monkeypatch):
+    args = source_fixture(tmp_path)
+    feed, archive, notes, records = args
+    from collector.prewatch_ready_integration import verify_sources
+    records[0]["observed_utc"] = "2026-11-25T07:53:01Z"
+    del records[0]["body"]
+    assert verify_sources(*args, NOW, verified_receipt=True)[ARCH] == 100
+    records[0]["body_sha256"] = "a" * 64
+    with pytest.raises(ValueError, match="ARCHIVE_RELEASE_BODY_MISMATCH"):
+        verify_sources(*args, NOW, verified_receipt=True)
+
+
+def test_direct_list_missing_and_duplicate_are_distinct(tmp_path, monkeypatch):
+    from collector.prewatch_ready_integration import release_evidence
+    index = fixture(tmp_path, race_numbers=(1,))
+    monkeypatch.setattr("collector.prewatch_ready_integration.gh_json", lambda *a: [[]])
+    with pytest.raises(ValueError, match="RELEASE_TAG_MISSING_OR_NOT_VISIBLE"):
+        release_evidence(index)
+    monkeypatch.setattr("collector.prewatch_ready_integration.gh_json",
+                        lambda *a: [[{"id": 1, "tag_name": TAG}, {"id": 2, "tag_name": TAG}]])
+    # Archive missing may sort after meeting tag; the duplicate is always rejected.
+    with pytest.raises(ValueError, match="RELEASE_TAG_DUPLICATE"):
+        release_evidence(index)
