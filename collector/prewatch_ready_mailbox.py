@@ -1,7 +1,7 @@
-"""Prepare or explicitly publish a ready packet to a dedicated private draft.
+"""Read-only preflight for a ready packet and dedicated private draft.
 
-The mailbox is mutable; original source Releases remain immutable. Never use
-an existing archive or meeting Release as a mailbox. No default write action.
+The future mailbox is mutable; original source Releases remain immutable.
+Publication is deliberately disabled until a separately approved activation.
 """
 from __future__ import annotations
 
@@ -47,8 +47,8 @@ def prepare_update(packet, release, draft_id, now):
     return {"body": body}
 
 
-def gh_api(path, *args, input_text=None):
-    return json.loads(subprocess.run(["gh", "api", path, *args], input=input_text,
+def gh_api(path):
+    return json.loads(subprocess.run(["gh", "api", "--method", "GET", path],
                                     text=True, capture_output=True, check=True).stdout)
 
 
@@ -56,22 +56,16 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--draft-id", type=int, required=True)
     p.add_argument("--packet", type=Path, required=True)
-    p.add_argument("--apply", action="store_true", help="Explicitly enable one mailbox-only PATCH")
+    p.add_argument("--apply", action="store_true", help="Reserved for future separately approved activation; currently rejected")
     args = p.parse_args()
+    # Fail before reading a local packet or calling GitHub. The future writer
+    # must be separately reviewed, serialized and activation-gated.
+    require(not args.apply, "MAILBOX_PUBLICATION_DISABLED")
     path = f"repos/{REPO}/releases/{args.draft_id}"
     packet = json.loads(args.packet.read_text(encoding="utf-8"))
     release = gh_api(path)
-    payload = prepare_update(packet, release, args.draft_id, datetime.now(timezone.utc))
-    if not args.apply:
-        print("MAILBOX_PREFLIGHT_PASS_NO_WRITE")
-        return
-    # Production callers must serialize mailbox writers. GitHub Release PATCH
-    # is not a compare-and-swap; the read above alone cannot prevent races.
-    gh_api(path, "--method", "PATCH", "--input", "-", input_text=json.dumps(payload))
-    actual = gh_api(path)
-    require(actual.get("body") == payload["body"] and actual.get("draft") is True
-            and actual.get("tag_name") == MAILBOX, "MAILBOX_READBACK_MISMATCH")
-    print("MAILBOX_WRITE_READBACK_CONFIRMED")
+    prepare_update(packet, release, args.draft_id, datetime.now(timezone.utc))
+    print("MAILBOX_PREFLIGHT_PASS_NO_WRITE")
 
 
 if __name__ == "__main__":

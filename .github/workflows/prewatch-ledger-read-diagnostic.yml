@@ -9,6 +9,11 @@ on:
         options:
           - auth_only
           - full_integration
+          - release_probe
+      approve_draft_readback:
+        description: "Explicit approval for isolated GET-only job with contents:write (full integration)"
+        type: boolean
+        default: false
       collector_run_id:
         description: "Completed main Collector workflow run ID (full integration only)"
         type: string
@@ -135,8 +140,72 @@ jobs:
           print("AUTH_TEST_PASS: two Ledger ranges; read-only scope; schema verified")
           PY
 
+
+  release-probe:
+    if: github.repository_id == '1424144324' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && (inputs.mode == 'release_probe' || inputs.mode == 'full_integration')
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    permissions:
+      contents: read
+    steps:
+      - name: Compare known draft visibility with read-only token
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          script="$RUNNER_TEMP/prewatch_release_readback.py"
+          gh api "repos/$GITHUB_REPOSITORY/contents/collector/prewatch_release_readback.py?ref=$GITHUB_SHA" --jq '.content' | base64 -d > "$script"
+          test -s "$script"
+          python3 "$script" --probe
+
+  draft-readback:
+    # Owner approval required both for merging this workflow and for this dispatch.
+    # GitHub does not offer a draft-only read permission. No Google access in this job.
+    if: github.repository_id == '1424144324' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.mode == 'full_integration' && inputs.approve_draft_readback == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    permissions:
+      contents: write
+      actions: read
+    env:
+      COLLECTOR_RUN_ID: ${{ inputs.collector_run_id }}
+    outputs:
+      receipt: ${{ steps.readback.outputs.receipt }}
+    steps:
+      - name: Validate existing source run and obtain index (no execution of artifact code)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$COLLECTOR_RUN_ID" =~ ^[0-9]{1,20}$ ]] || { echo INVALID_COLLECTOR_RUN_ID; exit 1; }
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$COLLECTOR_RUN_ID" > "$RUNNER_TEMP/readback-source-run.json"
+          python3 - <<'PY'
+          import json, os
+          from pathlib import Path
+          d=json.loads((Path(os.environ["RUNNER_TEMP"])/"readback-source-run.json").read_text())
+          if not (d["id"] == int(os.environ["COLLECTOR_RUN_ID"]) and
+                  d["repository"]["id"] == 1424144324 and d["workflow_id"] == 388333234 and
+                  d["head_branch"] == "main" and d["event"] in {"schedule","workflow_dispatch"} and
+                  d["status"] == "completed" and d["conclusion"] == "success"):
+              raise SystemExit("SOURCE_RUN_NOT_APPROVED")
+          PY
+          mkdir -p "$RUNNER_TEMP/readback-input"
+          gh run download "$COLLECTOR_RUN_ID" --repo "$GITHUB_REPOSITORY" --name prewatch-bridge-fallback --dir "$RUNNER_TEMP/readback-input"
+          test -f "$RUNNER_TEMP/readback-input/prewatch_feed/index.json"
+      - name: Numeric draft readback with fixed trusted main code (GET only)
+        id: readback
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          script="$RUNNER_TEMP/prewatch_release_readback.py"
+          gh api "repos/$GITHUB_REPOSITORY/contents/collector/prewatch_release_readback.py?ref=$GITHUB_SHA" --jq '.content' | base64 -d > "$script"
+          test -s "$script"
+          python3 "$script" --index "$RUNNER_TEMP/readback-input/prewatch_feed/index.json"
+
   integration:
-    if: github.repository_id == '1424144324' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.mode == 'full_integration'
+    needs: [release-probe, draft-readback]
+    if: github.repository_id == '1424144324' && github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.mode == 'full_integration' && inputs.approve_draft_readback == true
     runs-on: ubuntu-latest
     timeout-minutes: 8
     permissions:
@@ -144,7 +213,7 @@ jobs:
       actions: read
       id-token: write
     env:
-      CANDIDATE_SHA: 89ed8747ff9582c7c8b6d9b355941db0a3976ef3
+      CANDIDATE_SHA: bce63739a2493537aeec4d30693cb6c4f9e61c92
       COLLECTOR_RUN_ID: ${{ inputs.collector_run_id }}
     steps:
       - name: Verify immutable candidate and approved source run
@@ -167,7 +236,7 @@ jobs:
           PY
           mkdir -p "$RUNNER_TEMP/pinned-code/collector" "$RUNNER_TEMP/source-input"
           touch "$RUNNER_TEMP/pinned-code/collector/__init__.py"
-          for name in prewatch_ready prewatch_ledger_reader prewatch_ready_integration; do
+          for name in prewatch_ready prewatch_ledger_reader prewatch_ready_integration prewatch_release_readback; do
             gh api "repos/$GITHUB_REPOSITORY/contents/collector/$name.py?ref=$CANDIDATE_SHA" --jq '.content' | base64 -d > "$RUNNER_TEMP/pinned-code/collector/$name.py"
             test -s "$RUNNER_TEMP/pinned-code/collector/$name.py"
           done
@@ -194,7 +263,7 @@ jobs:
           export_environment_variables: false
       - name: Full Ledger and source integration (no publication)
         env:
-          GH_TOKEN: ${{ github.token }}
+          PREWATCH_LIVE_RELEASE_RECEIPT: ${{ needs.draft-readback.outputs.receipt }}
           PREWATCH_LEDGER_SPREADSHEET_ID: ${{ secrets.PREWATCH_LEDGER_SPREADSHEET_ID }}
           PREWATCH_LEDGER_ACCESS_TOKEN: ${{ steps.integration_auth.outputs.access_token }}
         run: |
@@ -208,6 +277,8 @@ jobs:
           from collector.prewatch_ledger_reader import read_live
           from collector.prewatch_ready_integration import main
           try:
+              if not os.environ.get("PREWATCH_LIVE_RELEASE_RECEIPT"):
+                  raise ValueError("RELEASE_RECEIPT_MISSING")
               if not os.environ.get("PREWATCH_LEDGER_ACCESS_TOKEN"):
                   raise ValueError("LEDGER_ACCESS_TOKEN_MISSING")
               day = datetime.now(ZoneInfo("Europe/Oslo")).date().isoformat()
@@ -229,10 +300,11 @@ jobs:
               packet = json.loads(out.read_text())
               if packet["diagnostic_status"] != "LIVE_LEDGER_SOURCE_DIAGNOSTIC" or packet["replay_only"] or packet["operational_publication_allowed"] or packet["bet_authority"] or packet["phase_a_completed"]:
                   raise ValueError("DIAGNOSTIC_BOUNDARY_INVALID")
-              print("FULL_INTEGRATION_DIAGNOSTIC_PASS")
-              if packet["status"] == "NO_ELIGIBLE_RACE":
-                  print("NO_ELIGIBLE_RACE_IS_NOT_LIVE_READY_PROOF")
+              if packet["status"] != "SOURCE_READY" or not packet.get("selected") or not packet.get("queue"):
+                  out.unlink()
+                  raise ValueError("NO_ELIGIBLE_RACE_IS_NOT_LIVE_READY_PROOF")
               out.unlink()
+              print("FULL_INTEGRATION_DIAGNOSTIC_PASS")
           except Exception as exc:
               code = str(exc)
               print(code if re.fullmatch(r"[A-Z][A-Z0-9_]{2,79}", code) else "INTEGRATION_DIAGNOSTIC_FAILED")

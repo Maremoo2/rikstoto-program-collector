@@ -173,3 +173,14 @@ def test_mailbox_guards(tmp_path):
         prepare_update(packet, dict(mailbox, tag_name=ARCH), 9, NOW)
     with pytest.raises(ValueError, match="PACKET_NOT_CURRENT"):
         prepare_update(packet, mailbox, 9, stamp("2026-11-25T08:16:00Z"))
+
+
+def test_mailbox_apply_disabled_before_any_network_or_file_access(monkeypatch, tmp_path):
+    import sys
+    from collector import prewatch_ready_mailbox as mailbox
+    monkeypatch.setattr(sys, "argv", ["mailbox", "--draft-id", "9", "--packet", str(tmp_path / "absent.json"), "--apply"])
+    def forbidden(*args, **kwargs):
+        pytest.fail("disabled publication attempted network access")
+    monkeypatch.setattr(mailbox, "gh_api", forbidden)
+    with pytest.raises(ValueError, match="MAILBOX_PUBLICATION_DISABLED"):
+        mailbox.main()

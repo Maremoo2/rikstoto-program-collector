@@ -1,12 +1,31 @@
-# CORE-STABILITY-001A-ENDPOINT — activation boundary
+# CORE-STABILITY-001 — merge versus activation boundary
 
-This branch adds a read-only Ledger reader and a manually dispatched authentication diagnostic. The existing Collector integration defaults to diagnostic-only; no publication, workflow schedule or Ledger write is authorized. A successful ChatGPT Sheets connector read does not establish Actions credentials.
+PR #63 adds diagnostic-only modules and offline tests. The scheduled Collector,
+refresh pilot and Pre-Watch automation are unchanged. The approved manual
+diagnostic from PRs #64–66 remains unchanged and pins the live-verified
+candidate bce63739a2493537aeec4d30693cb6c4f9e61c92.
 
-## Before any activation
-1. HQ review the exact PR HEAD and CI. Do not merge just to make a test green.
-2. Owner may create a marker-only draft through the GitHub Releases UI (tag and title `prewatch-ready-v1`, body `{"schema":"prewatch_ready_v1","status":"NOT_INITIALIZED","bet_authority":false}`). Save draft; never publish. Alternatively use the existing approved bootstrap workflow after it exists on main. Numeric authenticated GET and draft/published_at checks required. No actual source data in public repository artifacts.
-3. Configure a dedicated Google service account with Viewer access only on the named Ledger. Enable Sheets API and configure GitHub OIDC Workload Identity Federation with a provider condition scoped to this repository's immutable ID, trusted ref and exact diagnostic workflow; grant only workloadIdentityUser to the intended principal. No long-lived key, no public sharing. Set GitHub repository variables PREWATCH_WIF_PROVIDER and PREWATCH_LEDGER_READER_SA to the owner-provisioned identifiers. Set the GitHub Actions secret PREWATCH_LEDGER_SPREADSHEET_ID to the exact authorized spreadsheet ID (never commit it). Verify organization policies and least privilege; do not give the service account Editor.
-4. The manual diagnostic workflow requires main and configuration; run only after separate approval. It logs aggregate counts, not sheet content. A 403 is a failed read, never an empty Ledger.
-5. For a source integration diagnostic use --read-ledger with authenticated ADC and existing authenticated GitHub CLI. The packet remains operational_publication_allowed=false. No write or release PATCH in this task.
+## Existing evidence
+- Numeric marker-only draft 458013574, tag prewatch-ready-v1, is already
+  provisioned; no bootstrap writer is needed in this merge.
+- Run 45639694382 verified source archive and roster digests, draft readback,
+  Google WIF read-only Ledger (31 assessment / 264 field rows) and a nonempty
+  SOURCE_READY packet (19 eligible). Zero completed IDs that day; positive
+  live exclusion remains unproved, while synthetic tests cover exclusion.
+- No public artifact contains the Ready Packet or Ledger cells. Receipt metadata
+  (Release IDs, hashes, timestamps, asset metadata) appears in diagnostic logs;
+  it is not a secret credential. See PREWATCH_RELEASE_ACCESS_DIAGNOSTIC.md.
 
-A future task must prove the dedicated draft readback and complete live source + Ledger + transport chain, including one serialized writer and final prestart rechecks. The draft marker alone is not a valid packet. Rollback: leave main and scheduled Pre-Watch unchanged, revoke service account Viewer / WIF and delete only the newly created test draft if applicable with owner approval.
+## Before any separate activation
+1. Obtain explicit HQ/owner approval. Publication is hard-disabled in both
+   integration output and mailbox CLI; --apply fails before network access.
+2. Maintain dedicated Viewer-only Google identity, exact repository/ref/workflow
+   WIF condition and short-lived read-only Sheets token. Never create keys.
+3. Design and prove a single serialized writer and final prestart rechecks of
+   newest archive, roster and Ledger. A same-run readback receipt is a point-in-
+   time observation, not an atomic guarantee against concurrent new archives.
+4. Validate private draft identity, full packet readback, expiry, positive live
+   deduplication, prospective Phase A and shadow operation. Never publish the
+   private draft or allow betting authority in a source packet.
+5. Separate activation PR and approval required. No schedule, production,
+   mailbox or Ledger mutation is authorized by the code merge.
