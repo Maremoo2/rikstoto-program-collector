@@ -42,15 +42,14 @@ def _make_original_pdf_fixture():
     writer.drawText(flow)
     writer.showPage()
     writer.save()
-    content = stream.getvalue()
-    assert "\n\n".join(
-        page.extract_text() or "" for page in PdfReader(io.BytesIO(content)).pages
-    ) == EXCERPT
-    return content
+    return stream.getvalue()
 
 
 PDF = _make_original_pdf_fixture()
 PDF_SHA = hashlib.sha256(PDF).hexdigest()
+PDF_TEXT = "\n\n".join(
+    page.extract_text() or "" for page in PdfReader(io.BytesIO(PDF)).pages
+)
 
 
 def _hash(value):
@@ -65,7 +64,7 @@ def _shadow(raw=EXCERPT):
     )
 
 
-def _archive(tmp_path, raw=EXCERPT, *, two_pdfs=False, no_text=False):
+def _archive(tmp_path, raw=PDF_TEXT, *, two_pdfs=False, no_text=False):
     path = tmp_path / "original.zip"
     pdf_member = f"output/daily/{DAY}/run/meetings/{MEETING}/full_program.pdf"
     with zipfile.ZipFile(path, "w") as out:
@@ -133,6 +132,9 @@ def test_exact_13_fields_are_research_only_and_gallop_dq_never_inferred_false():
 
 
 def test_original_pdf_sha_and_raw_text_in_zip_are_checked_before_parse(tmp_path):
+    # pypdf 7.2.0 omits the synthetic page's final LF. All other
+    # characters must match, and the archive stores the extracted bytes.
+    assert PDF_TEXT in (EXCERPT, EXCERPT.removesuffix("\n"))
     p = _archive(tmp_path)
     report = replay_original_archive(
         p, meeting_id=MEETING, date_oslo=DAY, expected_pdf_sha256=PDF_SHA,
@@ -145,7 +147,7 @@ def test_original_pdf_sha_and_raw_text_in_zip_are_checked_before_parse(tmp_path)
     assert report["source_scope"].startswith("IMMUTABLE_ARCHIVED_PDF_BYTES")
     assert report["pdf_text_projection_reproduced_from_original_pdf"] is True
     assert report["pdf_extraction_page_count"] == 1
-    assert report["pdf_text_reextracted_sha256"] == _hash(EXCERPT)
+    assert report["pdf_text_reextracted_sha256"] == _hash(PDF_TEXT)
     assert report["pdf_text_projection_extractor"].startswith("pypdf ")
     assert report["independent_original_page_visual_review"] is False
     assert all(not row["source_text_projection_is_official_pdf_attested"]
@@ -268,9 +270,13 @@ def test_missing_archived_manifest_cannot_attest_pdf(tmp_path):
         )
 
 
-def test_tampered_derived_text_with_original_pdf_unchanged_is_blocked(tmp_path):
+@pytest.mark.parametrize("tampered_text", [
+    PDF_TEXT.replace("REMCO VL", "REMCO XX"),
+    PDF_TEXT.removesuffix("\n") if PDF_TEXT.endswith("\n") else PDF_TEXT + "\n",
+], ids=["horse-name", "terminal-line-feed"])
+def test_tampered_derived_text_with_original_pdf_unchanged_is_blocked(tmp_path, tampered_text):
     # PDF SHA is still the pinned valid original; only TXT content was changed.
-    path = _archive(tmp_path, raw=EXCERPT.replace("REMCO VL", "REMCO XX"))
+    path = _archive(tmp_path, raw=tampered_text)
     with pytest.raises(ValueError, match="ARCHIVED_PDF_TEXT_PROJECTION_MISMATCH"):
         replay_original_archive(
             path, meeting_id=MEETING, date_oslo=DAY, expected_pdf_sha256=PDF_SHA,
@@ -279,7 +285,7 @@ def test_tampered_derived_text_with_original_pdf_unchanged_is_blocked(tmp_path):
 
 def test_archived_txt_reordered_history_without_pdf_change_is_blocked(tmp_path):
     # Substituting a valid-looking history line is not a source projection.
-    mutated = EXCERPT.replace("19.07.26-6|", "19.08.26-6|")
+    mutated = PDF_TEXT.replace("19.07.26-6|", "19.08.26-6|")
     path = _archive(tmp_path, raw=mutated)
     with pytest.raises(ValueError, match="ARCHIVED_PDF_TEXT_PROJECTION_MISMATCH"):
         replay_original_archive(
