@@ -41,6 +41,9 @@ jobs:
   full-day:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    outputs:
+      capture_date: ${{ steps.harvest.outputs.capture_date }}
+      capture_status: ${{ steps.harvest.outputs.capture_status }}
     env:
       SELECTED_DATE: ${{ inputs.date || '' }}
       SEED_MEETING: ${{ inputs.seed_meeting || '' }}
@@ -86,11 +89,19 @@ jobs:
         id: harvest
         continue-on-error: true
         run: |
-          set -o pipefail
-          args=(--out output/daily)
-          if [ -n "$SELECTED_DATE" ]; then args+=(--date "$SELECTED_DATE"); fi
+          set -euo pipefail
+          capture_date="${SELECTED_DATE:-$(date +%F)}"
+          args=(--out output/daily --date "$capture_date" --publication-exit-status)
           if [ -n "$SEED_MEETING" ]; then args+=(--seed-meeting "$SEED_MEETING"); fi
-          python -m collector.daily "${args[@]}" 2>&1 | tee daily-console.log
+          status=0
+          python -m collector.daily "${args[@]}" > daily-console.log 2>&1 || status=$?
+          cat daily-console.log
+          case "$status" in
+            0) capture_status=CAPTURED_UNVERIFIED ;;
+            3) capture_status=REVIEW_REQUIRED ;;
+            *) exit "$status" ;;
+          esac
+          printf 'capture_date=%s\ncapture_status=%s\n' "$capture_date" "$capture_status" >> "$GITHUB_OUTPUT"
       - name: Detail unresolved PDF/startlist discrepancies
         if: always()
         run: |
@@ -183,9 +194,8 @@ jobs:
     name: Save privately accessible draft archive in GitHub Releases
     needs: [full-day]
     # Publish only scheduled or manually authorized archives.
-    # Source Releases may only be published after successful capture.
-    # On failure, Actions diagnostic artifacts remain, but no fresh draft
-    # source Release is generated from incomplete/failed collection.
+    # Completed captures still need archive integrity and qualified NO/SE
+    # source evidence before any publication.
     if: ${{ needs['full-day'].result == 'success' && (github.event_name == 'schedule' || (github.event_name == 'workflow_dispatch' && inputs.persist_archive == true)) }}
     runs-on: ubuntu-latest
     timeout-minutes: 12
@@ -204,17 +214,18 @@ jobs:
         with:
           name: rikstoto-morning-programs
           path: daily-artifact
-      - name: Build Pre-Watch read-only source feeds for Norwegian/Swedish races
-        run: |
-          python -m collector.prewatch_handoff \
-            --root daily-artifact/output/daily \
-            --dest prewatch_feed
-      - name: Build an immutable archive and SHA-256 checksum
+      - name: Validate publication and package the original snapshot
         id: package
+        env:
+          CAPTURE_DATE: ${{ needs['full-day'].outputs.capture_date }}
+          CAPTURE_STATUS: ${{ needs['full-day'].outputs.capture_status }}
         run: |
           python -m collector.release_archive \
             --root daily-artifact/output/daily \
             --dest release-assets \
+            --publication-feed prewatch_feed \
+            --capture-date "$CAPTURE_DATE" \
+            --capture-status "$CAPTURE_STATUS" \
             --github-output "$GITHUB_OUTPUT"
       - name: Preserve Pre-Watch bridge even if GitHub Release permission is denied
         uses: actions/upload-artifact@v4

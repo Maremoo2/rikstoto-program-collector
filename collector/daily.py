@@ -686,6 +686,8 @@ def main():
                         help="Optional independently known meeting ID for this date, not part of auto discovery")
     parser.add_argument("--max-meetings", type=int, default=18)
     parser.add_argument("--max-races", type=int, default=18)
+    parser.add_argument("--publication-exit-status", action="store_true",
+                        help="Return exit 3 for a completed REVIEW_REQUIRED capture")
     args = parser.parse_args()
     if not (1 <= args.max_meetings <= 25 and 1 <= args.max_races <= 25):
         parser.error("max-meetings and max-races must be between 1 and 25")
@@ -695,6 +697,8 @@ def main():
                                               max_races=args.max_races,
                                               seed_meetings=args.seed_meeting))
     print(f"Manifest: {folder / 'manifest.json'}")
+    if args.publication_exit_status and result["status"] == "REVIEW_REQUIRED":
+        return 3
     return 0 if result["status"] == "CAPTURED_UNVERIFIED" else 1
 
 
